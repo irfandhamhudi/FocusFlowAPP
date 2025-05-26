@@ -137,7 +137,7 @@ function AppContent() {
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/subpath">
       <AuthProvider>
         <AppContent />
       </AuthProvider>

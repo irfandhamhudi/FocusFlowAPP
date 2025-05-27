@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { fetchTasks, updateTask, deleteTask } from "../utils/apiTask"; // Impor deleteTask
+import { fetchTasks, updateTask, deleteTask } from "../utils/apiTask";
 import Swal from "sweetalert2";
 import TaskForm from "../components/TaskForm";
 import TaskDetail from "./TaskDetail";
@@ -12,18 +12,15 @@ import {
   CalendarClock,
   CalendarCheck2,
   PencilLine,
-  Paperclip,
   FileText,
   X,
-  TrashIcon,
   Trash,
-  UserRoundX, // Impor ikon Trash untuk tombol hapus
+  UserRoundX,
 } from "lucide-react";
 import { getInitialsAndColor } from "../utils/helpers";
 
 function TaskList() {
   const [tasks, setTasks] = useState([]);
-  // const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isListboxOpen, setIsListboxOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
@@ -32,6 +29,11 @@ function TaskList() {
   const [showTaskFormModal, setShowTaskFormModal] = useState(false);
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const listboxRefs = useRef({});
+  const columnRefs = useRef({
+    pending: null,
+    inProgress: null,
+    completed: null,
+  });
 
   useEffect(() => {
     loadTasks();
@@ -53,7 +55,6 @@ function TaskList() {
 
   const loadTasks = async () => {
     try {
-      // setLoading(true);
       const data = await fetchTasks();
       setTasks(data);
       setError(null);
@@ -72,11 +73,9 @@ function TaskList() {
     loadTasks();
   };
 
-  // Fungsi untuk menangani penghapusan tugas
   const handleDeleteTask = async (taskId, e) => {
     e.stopPropagation();
 
-    // Gunakan SweetAlert2 untuk konfirmasi
     const result = await Swal.fire({
       title: "Are you sure?",
       text: "You won't be able to revert this!",
@@ -90,10 +89,10 @@ function TaskList() {
 
     if (result.isConfirmed) {
       try {
-        await deleteTask(taskId); // Panggil API untuk menghapus tugas
+        await deleteTask(taskId);
         setIsListboxOpen(false);
         setSelectedTaskId(null);
-        loadTasks(); // Refresh daftar tugas setelah penghapusan
+        loadTasks();
         Swal.fire({
           title: "Deleted successfully!",
           text: "Task has been deleted.",
@@ -102,12 +101,11 @@ function TaskList() {
           showConfirmButton: false,
         });
       } catch (err) {
-        error && setError(null);
         setError("Error deleting task.");
         console.error("Error deleting task:", err);
         Swal.fire({
           title: "Error!",
-          text: error.message || "Failed to delete task.",
+          text: err.message || "Failed to delete task.",
           icon: "error",
           confirmButtonText: "OK",
         });
@@ -118,13 +116,15 @@ function TaskList() {
   const handleDragStart = (taskId, e) => {
     setDraggedTaskId(taskId);
     e.target.classList.add("cursor-move");
+    e.dataTransfer.setData("text/plain", taskId);
   };
 
   const handleDragOver = (e) => {
     e.preventDefault();
   };
 
-  const handleDrop = async (newStatus) => {
+  const handleDrop = async (newStatus, e) => {
+    e.preventDefault();
     if (!draggedTaskId) return;
 
     try {
@@ -142,6 +142,74 @@ function TaskList() {
     e.target.classList.remove("cursor-move");
   };
 
+  const handleTouchStart = (taskId, e) => {
+    setDraggedTaskId(taskId);
+    e.target.classList.add("opacity-50", "cursor-move");
+    e.target.style.touchAction = "none";
+  };
+
+  const handleTouchMove = (e) => {
+    if (!draggedTaskId) return;
+
+    const touch = e.touches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+
+    Object.keys(columnRefs.current).forEach((status) => {
+      const column = columnRefs.current[status];
+      if (column && column.contains(element)) {
+        column.classList.add(
+          "bg-gray-100",
+          "border-2",
+          "border-dashed",
+          "border-gray-300"
+        );
+      } else if (column) {
+        column.classList.remove(
+          "bg-gray-100",
+          "border-2",
+          "border-dashed",
+          "border-gray-300"
+        );
+      }
+    });
+  };
+
+  const handleTouchEnd = async (e) => {
+    if (!draggedTaskId) return;
+
+    const touch = e.changedTouches[0];
+    const targetElement = e.target;
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+
+    let newStatus = null;
+    Object.keys(columnRefs.current).forEach((status) => {
+      const column = columnRefs.current[status];
+      if (column && column.contains(element)) {
+        newStatus = status;
+      }
+      column?.classList.remove(
+        "bg-gray-100",
+        "border-2",
+        "border-dashed",
+        "border-gray-300"
+      );
+    });
+
+    if (newStatus) {
+      try {
+        await updateTask(draggedTaskId, { status: newStatus });
+        loadTasks();
+      } catch (err) {
+        setError("Error updating task status.");
+        console.error("Error updating task status:", err);
+      }
+    }
+
+    setDraggedTaskId(null);
+    targetElement.classList.remove("opacity-50", "cursor-move");
+    targetElement.style.touchAction = "auto";
+  };
+
   const getTotalComments = (task) => {
     if (!task.comments || task.comments.length === 0) return 0;
     const commentCount = task.comments.length;
@@ -157,13 +225,6 @@ function TaskList() {
       : 0;
   };
 
-  // const getInitial = (username) => {
-  //   return username && username.length > 0
-  //     ? username[0].toUpperCase() +
-  //         (username[1] ? username[1].toUpperCase() : "")
-  //     : "?";
-  // };
-
   const formatDate = (dateString) => {
     if (!dateString) return "No Date";
     const date = new Date(dateString);
@@ -174,29 +235,16 @@ function TaskList() {
     });
   };
 
-  // const avatarColors = [
-  //   "bg-blue-500",
-  //   "bg-green-500",
-  //   "bg-purple-500",
-  //   "bg-red-500",
-  //   "bg-indigo-500",
-  //   "bg-pink-500",
-  // ];
-
-  // const getAvatarColor = (index) => {
-  //   return avatarColors[index % avatarColors.length];
-  // };
-
   const statusColors = {
-    pending: "bg-yellow-200 text-yellow-800 border-yellow-300",
-    inProgress: "bg-blue-200 text-blue-800 border-blue-300",
-    completed: "bg-green-200 text-green-800 border-green-300",
+    pending: "bg-yellow-200 text-yellow-800",
+    inProgress: "bg-blue-200 text-blue-800",
+    completed: "bg-green-200 text-green-800",
   };
 
   const priorityColors = {
-    low: "bg-gray-200 text-gray-800 border-gray-300",
-    medium: "bg-orange-200 text-orange-800 border-orange-300",
-    high: "bg-red-200 text-red-800 border-red-300",
+    low: "bg-gray-200 text-gray-800",
+    medium: "bg-yellow-100 text-yellow-800",
+    high: "bg-red-200 text-red-800",
   };
 
   const pendingTasks = tasks.filter((task) => task.status === "pending");
@@ -244,12 +292,14 @@ function TaskList() {
       draggable
       onDragStart={(e) => handleDragStart(task._id, e)}
       onDragEnd={handleDragEnd}
+      onTouchStart={(e) => handleTouchStart(task._id, e)}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       <div className="flex justify-between items-center mb-1">
         <span
-          className={`px-4 mb-3 py-1 text-[11px] capitalize rounded-md border ${
-            priorityColors[task.priority] ||
-            "bg-gray-100 text-gray-800 border-gray-200"
+          className={`px-4 mb-3 py-1 text-[11px] font-medium capitalize rounded ${
+            priorityColors[task.priority] || "bg-gray-100 text-gray-800"
           }`}
         >
           {task.priority ? `${task.priority} Priority` : "Unknown Priority"}
@@ -287,7 +337,6 @@ function TaskList() {
       <h3 className="text-sm font-medium text-gray-900 truncate">
         {task.title || "Tanpa Judul"}
       </h3>
-
       <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
         <p className="flex items-center gap-1">
           <CalendarClock className="h-4 w-4 text-font3" />
@@ -299,12 +348,10 @@ function TaskList() {
           {formatDate(task.dueDate)}
         </p>
       </div>
-
       <div className="mt-5 flex items-center">
         <div className="flex">
           {Array.isArray(task.assignedTo) && task.assignedTo.length > 0 ? (
             <div className="flex">
-              {/* Tampilkan maksimal 4 avatar pertama */}
               {task.assignedTo.slice(0, 3).map((user, index) => {
                 const { initials, color } = getInitialsAndColor(user.username);
                 return (
@@ -313,10 +360,7 @@ function TaskList() {
                     className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-sm border-2 border-white ${
                       index > 0 ? "ml-[-8px]" : ""
                     }`}
-                    style={{
-                      backgroundColor: color,
-                      zIndex: 3 - index, // Atur z-index untuk overlap yang benar
-                    }}
+                    style={{ backgroundColor: color, zIndex: 3 - index }}
                     title={user.username}
                   >
                     {user.avatar ? (
@@ -333,8 +377,6 @@ function TaskList() {
                   </div>
                 );
               })}
-
-              {/* Tampilkan indikator jumlah user lebih dari 4 */}
               {task.assignedTo.length > 3 && (
                 <div
                   className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-200 text-gray-600 font-medium text-xs border-2 border-white ml-[-8px]"
@@ -376,13 +418,12 @@ function TaskList() {
           Add new Task
         </button>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 text-sm">
-        {/* Pending Column */}
         <div
+          ref={(el) => (columnRefs.current.pending = el)}
           onDragOver={handleDragOver}
-          onDrop={() => handleDrop("pending")}
-          className={`min-h-[200px] p-2  rounded-md ${
+          onDrop={(e) => handleDrop("pending", e)}
+          className={`min-h-[200px] p-2 rounded-md ${
             draggedTaskId
               ? "bg-gray-100 border-2 border-dashed border-gray-300"
               : ""
@@ -399,18 +440,16 @@ function TaskList() {
             </div>
             <Clock className="h-5 w-5 text-yellow-500" />
           </div>
-
           {pendingTasks.length === 0 ? (
             <p className="text-gray-500 text-center py-2">No Assignments.</p>
           ) : (
             <div className="grid gap-2">{pendingTasks.map(renderTaskItem)}</div>
           )}
         </div>
-
-        {/* In Progress Column */}
         <div
+          ref={(el) => (columnRefs.current.inProgress = el)}
           onDragOver={handleDragOver}
-          onDrop={() => handleDrop("inProgress")}
+          onDrop={(e) => handleDrop("inProgress", e)}
           className={`min-h-[200px] p-2 rounded-md ${
             draggedTaskId
               ? "bg-gray-100 border-2 border-dashed border-gray-300"
@@ -428,7 +467,6 @@ function TaskList() {
             </div>
             <Loader className="h-5 w-5 text-blue-500" />
           </div>
-
           {inProgressTasks.length === 0 ? (
             <p className="text-gray-500 text-center py-2">No Assignments.</p>
           ) : (
@@ -437,11 +475,10 @@ function TaskList() {
             </div>
           )}
         </div>
-
-        {/* Completed Column */}
         <div
+          ref={(el) => (columnRefs.current.completed = el)}
           onDragOver={handleDragOver}
-          onDrop={() => handleDrop("completed")}
+          onDrop={(e) => handleDrop("completed", e)}
           className={`min-h-[200px] p-2 rounded-md ${
             draggedTaskId
               ? "bg-gray-100 border-2 border-dashed border-gray-300"
@@ -459,7 +496,6 @@ function TaskList() {
             </div>
             <CircleCheck className="h-5 w-5 text-green-500" />
           </div>
-
           {completedTasks.length === 0 ? (
             <p className="text-gray-500 text-center py-2">No Assignments.</p>
           ) : (
@@ -469,10 +505,7 @@ function TaskList() {
           )}
         </div>
       </div>
-
-      {/* {error && <p className="text-red-500 mb-4 text-sm">{error}</p>} */}
-
-      {/* Modal TaskDetail */}
+      {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
       {showTaskDetailModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-end">
           <div
@@ -488,8 +521,6 @@ function TaskList() {
           </div>
         </div>
       )}
-
-      {/* Modal TaskForm */}
       {showTaskFormModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-end">
           <div

@@ -3,6 +3,7 @@ import axios from "axios";
 const api = axios.create({
   baseURL:
     "https://api-focusflow-production.up.railway.app/api/v1/notifications",
+  // baseURL: "http://localhost:5000/api/v1/notifications",
   withCredentials: true,
 });
 

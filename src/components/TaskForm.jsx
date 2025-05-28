@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { createTask } from "../utils/apiTask";
-import { getAllUsers } from "../utils/apiAuth";
 import Select from "react-select";
 import { Trash, Upload } from "lucide-react";
 import { toast } from "react-hot-toast";
+import CreatableSelect from "react-select/creatable"; // Untuk input email bebas
 
 function TaskForm({ onTaskCreated }) {
   const [formData, setFormData] = useState({
@@ -14,27 +14,17 @@ function TaskForm({ onTaskCreated }) {
     tags: "",
     startDate: "",
     dueDate: "",
-    assignedTo: [],
+    assignedTo: [], // Sekarang array email
     attachment: [],
     subtask: [{ title: "", completed: false }],
   });
-  const [users, setUsers] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
-
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  const loadUsers = async () => {
-    try {
-      const data = await getAllUsers();
-      setUsers(data);
-    } catch (err) {
-      toast.error("Failed to load user list.");
-      console.error("Error fetching users:", err);
-    }
+  // Validasi format email
+  const isValidEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   };
 
   const handleSubmit = async (e) => {
@@ -43,6 +33,16 @@ function TaskForm({ onTaskCreated }) {
       toast.error("Title is required.");
       return;
     }
+
+    // Validasi email di assignedTo
+    const invalidEmails = formData.assignedTo.filter(
+      (email) => !isValidEmail(email)
+    );
+    if (invalidEmails.length > 0) {
+      toast.error("Invalid email addresses: " + invalidEmails.join(", "));
+      return;
+    }
+
     try {
       const taskData = {
         title: formData.title,
@@ -75,7 +75,7 @@ function TaskForm({ onTaskCreated }) {
         attachment: [],
         subtask: [{ title: "", completed: false }],
       });
-      toast.success("Task created successfully!");
+      toast.success("Task created successfully! Invitations sent.");
       onTaskCreated();
     } catch (err) {
       toast.error(
@@ -102,13 +102,6 @@ function TaskForm({ onTaskCreated }) {
     { value: "high", label: "High" },
   ];
 
-  const userOptions = Array.isArray(users)
-    ? users.map((user) => ({
-        value: user._id,
-        label: user.username,
-      }))
-    : [];
-
   const handleStatusChange = (selectedOption) => {
     setFormData({
       ...formData,
@@ -124,10 +117,10 @@ function TaskForm({ onTaskCreated }) {
   };
 
   const handleAssignedToChange = (selectedOptions) => {
-    const selectedValues = selectedOptions
+    const selectedEmails = selectedOptions
       ? selectedOptions.map((option) => option.value)
       : [];
-    setFormData({ ...formData, assignedTo: selectedValues });
+    setFormData({ ...formData, assignedTo: selectedEmails });
   };
 
   const handleSubtaskChange = (index, value) => {
@@ -304,19 +297,24 @@ function TaskForm({ onTaskCreated }) {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Assigned To
+            Assigned To (Enter emails)
           </label>
-          <Select
+          <CreatableSelect
             isMulti
-            options={userOptions}
-            value={userOptions.filter((option) =>
-              formData.assignedTo.includes(option.value)
-            )}
+            value={formData.assignedTo.map((email) => ({
+              value: email,
+              label: email,
+            }))}
             onChange={handleAssignedToChange}
-            placeholder="Select assigned users..."
+            placeholder="Type email addresses..."
             className="text-sm"
             classNamePrefix="react-select"
+            formatCreateLabel={(inputValue) => `Add "${inputValue}"`}
+            noOptionsMessage={() => "Type an email address to add"}
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Enter valid email addresses to invite users
+          </p>
         </div>
 
         <div>

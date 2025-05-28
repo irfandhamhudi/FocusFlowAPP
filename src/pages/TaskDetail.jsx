@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   fetchTaskById,
   addComment,
@@ -7,10 +7,9 @@ import {
   fetchRecentActivity,
   downloadFile,
 } from "../utils/apiTask";
-import { getAllUsers } from "../utils/apiAuth";
-import { getInitialsAndColor, getFileType } from "../utils/helpers";
-import Select from "react-select";
 import { toast } from "react-hot-toast";
+import CreatableSelect from "react-select/creatable";
+import Select from "react-select";
 import {
   Activity,
   CalendarCheck2,
@@ -18,7 +17,6 @@ import {
   CircleCheck,
   Clock,
   CloudDownload,
-  FilePenLine,
   FileText,
   ListTodo,
   Loader,
@@ -31,12 +29,22 @@ import {
   X,
   Upload,
 } from "lucide-react";
+import { getInitialsAndColor, getFileType } from "../utils/helpers";
 
 function TaskDetail({ taskId, onClose, onTaskUpdated }) {
   const [task, setTask] = useState(null);
   const [error, setError] = useState(null);
   const [comment, setComment] = useState("");
   const [replyInputs, setReplyInputs] = useState({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [activities, setActivities] = useState([]);
+  const [activeTab, setActiveTab] = useState("subtasks");
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [currentTextarea, setCurrentTextarea] = useState(null);
+
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -49,23 +57,10 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     subtask: [],
     attachment: [],
   });
-  const [users, setUsers] = useState([]);
-  const [isEditing, setIsEditing] = useState(false);
-  const [activities, setActivities] = useState([]);
-  const [activeTab, setActiveTab] = useState("subtasks");
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    loadTask();
-    loadUsers();
-    loadRecentActivity();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
-
-  const loadTask = async () => {
+  const loadTask = useCallback(async () => {
     try {
       const data = await fetchTaskById(taskId);
       setTask(data);
@@ -78,7 +73,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
         startDate: data.startDate ? data.startDate.split("T")[0] : "",
         dueDate: data.dueDate ? data.dueDate.split("T")[0] : "",
         assignedTo: data.assignedTo
-          ? data.assignedTo.map((user) => user._id)
+          ? data.assignedTo.map((user) => user.email || "")
           : [],
         subtask: data.subtask
           ? data.subtask.map((sub) => ({
@@ -90,21 +85,11 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       });
     } catch (err) {
       toast.error(err.message || "Error fetching task.");
-      console.error("Error fetching task:", err);
+      setError(err.message);
     }
-  };
+  }, [taskId]);
 
-  const loadUsers = async () => {
-    try {
-      const data = await getAllUsers();
-      setUsers(Array.isArray(data) ? data : []);
-    } catch (err) {
-      toast.error("Error fetching users.");
-      console.error("Error fetching users:", err);
-    }
-  };
-
-  const loadRecentActivity = async () => {
+  const loadRecentActivity = useCallback(async () => {
     try {
       const data = await fetchRecentActivity(10);
       const relevantActivities = data.filter(
@@ -113,53 +98,35 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       setActivities(relevantActivities);
     } catch (err) {
       toast.error("Error fetching recent activity.");
-      console.error("Error fetching recent activity:", err);
+      setError(err.message);
     }
-  };
+  }, [taskId]);
 
-  const handleCommentSubmit = async (e) => {
-    e.preventDefault();
-    if (!comment.trim()) {
-      toast.error("Comment cannot be empty.");
-      return;
-    }
-    try {
-      await addComment(taskId, comment.trim());
-      setComment("");
-      toast.success("Comment Added!");
-      loadTask();
-      loadRecentActivity();
-    } catch (err) {
-      toast.error(err.message || "Error creating comment.");
-      console.error("Error adding comment:", err);
-    }
-  };
+  useEffect(() => {
+    loadTask();
+    loadRecentActivity();
+  }, [taskId, loadTask, loadRecentActivity]);
 
-  const handleReplySubmit = async (commentId, inputId, e) => {
-    e.preventDefault();
-    const replyText = replyInputs[inputId]?.trim();
-    if (!replyText) {
-      toast.error("Reply cannot be empty.");
-      return;
-    }
-    try {
-      await addCommentReply(taskId, commentId, replyText);
-      setReplyInputs((prev) => ({ ...prev, [inputId]: "" }));
-      toast.success("Reply Added!");
-      loadTask();
-      loadRecentActivity();
-    } catch (err) {
-      toast.error(err.message || "Error creating reply.");
-      console.error("Error adding reply:", err);
-    }
+  const isValidEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   };
 
   const handleUpdateSubmit = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) {
-      toast.error("Title cannot be empty.");
+      toast.error("Title is required.");
       return;
     }
+
+    const invalidEmails = formData.assignedTo.filter(
+      (email) => email && !isValidEmail(email)
+    );
+    if (invalidEmails.length > 0) {
+      toast.error(`Invalid emails: ${invalidEmails.join(", ")}`);
+      return;
+    }
+
     try {
       const taskData = {
         title: formData.title,
@@ -174,20 +141,21 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
           : [],
         startDate: formData.startDate || undefined,
         dueDate: formData.dueDate || undefined,
-        assignedTo: formData.assignedTo.length > 0 ? formData.assignedTo : [],
-        subtask: formData.subtask,
+        assignedTo: formData.assignedTo.filter((email) => email),
+        subtask: formData.subtask.filter((sub) => sub.title.trim()),
         attachment:
           formData.attachment.length > 0 ? formData.attachment : undefined,
       };
+
       await updateTask(taskId, taskData);
       setIsEditing(false);
-      toast.success("Task Successfully Updated!");
+      toast.success("Task updated successfully!");
       loadTask();
       loadRecentActivity();
       onTaskUpdated();
     } catch (err) {
-      toast.error(err.message || "Error updating task.");
-      console.error("Error updating task:", err);
+      toast.error(err.message || "Failed to update task.");
+      setError(err.message);
     }
   };
 
@@ -208,7 +176,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
         ...prev,
         attachment: [...prev.attachment, ...newFiles],
       }));
-      toast.success(`${newFiles.length} file(s) uploaded successfully!`);
+      toast.success(`${newFiles.length} file(s) added.`);
     }
   };
 
@@ -235,114 +203,11 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     fileInputRef.current.click();
   };
 
-  // const formatAction = (action) => {
-  //   // Menangani "uploaded file(s)"
-  //   if (action.includes("uploaded file(s):")) {
-  //     const [userPart, filePart] = action.split(" uploaded file(s): ");
-  //     return (
-  //       <>
-  //         {userPart} uploaded file(s){" "}
-  //         <span className="font-bold">{filePart}</span>
-  //       </>
-  //     );
-  //   }
-  //   // Menangani "created task"
-  //   if (action.includes("created task")) {
-  //     const prefix = action.split("created task ")[0];
-  //     const titleMatch = action.match(/created task ([^ ]+)/);
-  //     if (titleMatch) {
-  //       const titlePart = titleMatch[1];
-  //       return (
-  //         <>
-  //           {prefix}created task <span className="font-bold">{titlePart}</span>
-  //         </>
-  //       );
-  //     }
-  //   }
-  //   // Menangani "assigned task with title"
-  //   if (action.includes("assigned task with title")) {
-  //     const prefix = action.split("assigned task with title ")[0];
-  //     const titleMatch = action.match(/assigned task with title "([^"]+)"/);
-  //     if (titleMatch) {
-  //       const titlePart = titleMatch[1];
-  //       return (
-  //         <>
-  //           {prefix}assigned task with title{" "}
-  //           <span className="font-bold">{titlePart}</span>
-  //         </>
-  //       );
-  //     }
-  //   }
-  //   // Menangani "accepted invitation to join"
-  //   if (action.includes("accepted invitation to join")) {
-  //     const prefix = action.split(" accepted invitation to join ")[0];
-  //     const titlePart = action.split(" accepted invitation to join ")[1];
-  //     return (
-  //       <>
-  //         {prefix} accepted invitation to join{" "}
-  //         <span className="font-bold">{titlePart}</span>
-  //       </>
-  //     );
-  //   }
-  //   // Menangani "declined invitation to join"
-  //   if (action.includes("declined invitation to join")) {
-  //     const prefix = action.split(" declined invitation to join ")[0];
-  //     const titlePart = action.split(" declined invitation to join ")[1];
-  //     return (
-  //       <>
-  //         {prefix} declined invitation to join{" "}
-  //         <span className="font-bold">{titlePart}</span>
-  //       </>
-  //     );
-  //   }
-  //   return action;
-  // };
-
   const handleRemoveFile = (index) => {
     setFormData((prev) => ({
       ...prev,
       attachment: prev.attachment.filter((_, i) => i !== index),
     }));
-  };
-
-  const statusOptions = [
-    { value: "pending", label: "Pending" },
-    { value: "inProgress", label: "In Progress" },
-    { value: "completed", label: "Completed" },
-  ];
-
-  const priorityOptions = [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-  ];
-
-  const userOptions = Array.isArray(users)
-    ? users.map((user) => ({
-        value: user._id,
-        label: user.username,
-      }))
-    : [];
-
-  const handleStatusChange = (selectedOption) => {
-    setFormData({
-      ...formData,
-      status: selectedOption ? selectedOption.value : "pending",
-    });
-  };
-
-  const handlePriorityChange = (selectedOption) => {
-    setFormData({
-      ...formData,
-      priority: selectedOption ? selectedOption.value : "low",
-    });
-  };
-
-  const handleAssignedToChange = (selectedOptions) => {
-    const selectedValues = selectedOptions
-      ? selectedOptions.map((option) => option.value)
-      : [];
-    setFormData({ ...formData, assignedTo: selectedValues });
   };
 
   const handleSubtaskChange = (index, value) => {
@@ -360,17 +225,13 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     setFormData({ ...formData, subtask: updatedSubtasks });
 
     try {
-      const taskData = {
-        subtask: updatedSubtasks,
-      };
-      await updateTask(taskId, taskData);
-      toast.success("Subtask updated successfully!");
+      await updateTask(taskId, { subtask: updatedSubtasks });
+      toast.success("Subtask updated.");
       loadTask();
       loadRecentActivity();
       onTaskUpdated();
     } catch (err) {
       toast.error(err.message || "Error updating subtask.");
-      console.error("Error updating subtask:", err);
     }
   };
 
@@ -388,17 +249,242 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     });
   };
 
-  const handleReplyInputChange = (id, value) => {
-    setReplyInputs((prev) => ({ ...prev, [id]: value }));
+  const handleCommentSubmit = async (e) => {
+    e.preventDefault();
+    if (!comment.trim()) {
+      toast.error("Comment cannot be empty.");
+      return;
+    }
+    try {
+      await addComment(taskId, comment.trim());
+      setComment("");
+      toast.success("Comment added.");
+      loadTask();
+      loadRecentActivity();
+    } catch (err) {
+      toast.error(err.message || "Error adding comment.");
+    }
+  };
+
+  const handleReplySubmit = async (commentId, inputId, e) => {
+    e.preventDefault();
+    const replyText = replyInputs[inputId]?.trim();
+    if (!replyText) {
+      toast.error("Reply cannot be empty.");
+      return;
+    }
+    try {
+      await addCommentReply(taskId, commentId, replyText);
+      setReplyInputs((prev) => ({ ...prev, [inputId]: "" }));
+      toast.success("Reply added.");
+      loadTask();
+      loadRecentActivity();
+    } catch (err) {
+      toast.error(err.message || "Error adding reply.");
+    }
   };
 
   const handleDownload = async (fileName) => {
     try {
       await downloadFile(taskId, fileName);
     } catch (err) {
-      setError(`Error downloading file: ${error.message}`);
-      console.error("Error downloading file:", err.message);
+      toast.error(`Error downloading file: ${err.message}`);
     }
+  };
+
+  const handleMentionInput = (value) => {
+    setComment(value);
+    const lastWord = value.split(" ").pop();
+    if (lastWord.startsWith("@")) {
+      const searchTerm = lastWord.slice(1).toLowerCase();
+      // Combine assignedTo and owner emails, ensuring no duplicates
+      const assignedEmails = task?.assignedTo
+        ? task.assignedTo
+            .filter((user) => user.email?.toLowerCase().includes(searchTerm))
+            .map((user) => ({ email: user.email }))
+        : [];
+      const ownerEmail = task?.owner?.email?.toLowerCase().includes(searchTerm)
+        ? [{ email: task.owner.email }]
+        : [];
+      // Use Set to remove duplicates based on email
+      const uniqueEmails = [
+        ...new Map(
+          [...assignedEmails, ...ownerEmail].map((item) => [item.email, item])
+        ).values(),
+      ];
+      setSuggestions(uniqueEmails);
+      setShowSuggestions(true);
+      setCurrentTextarea("comment");
+    } else {
+      setShowSuggestions(false);
+      setSuggestions([]);
+      setCurrentTextarea(null);
+    }
+  };
+
+  const handleReplyInputChange = (id, value) => {
+    setReplyInputs((prev) => ({ ...prev, [id]: value }));
+    const lastWord = value.split(" ").pop();
+    if (lastWord.startsWith("@")) {
+      const searchTerm = lastWord.slice(1).toLowerCase();
+      // Combine assignedTo and owner emails, ensuring no duplicates
+      const assignedEmails = task?.assignedTo
+        ? task.assignedTo
+            .filter((user) => user.email?.toLowerCase().includes(searchTerm))
+            .map((user) => ({ email: user.email }))
+        : [];
+      const ownerEmail = task?.owner?.email?.toLowerCase().includes(searchTerm)
+        ? [{ email: task.owner.email }]
+        : [];
+      // Use Set to remove duplicates based on email
+      const uniqueEmails = [
+        ...new Map(
+          [...assignedEmails, ...ownerEmail].map((item) => [item.email, item])
+        ).values(),
+      ];
+      setSuggestions(uniqueEmails);
+      setShowSuggestions(true);
+      setCurrentTextarea(id);
+    } else {
+      setShowSuggestions(false);
+      setSuggestions([]);
+      setCurrentTextarea(null);
+    }
+  };
+
+  const handleSelectMention = (email) => {
+    const textareaValue =
+      currentTextarea === "comment"
+        ? comment
+        : replyInputs[currentTextarea] || "";
+    const lastSpaceIndex = textareaValue.lastIndexOf("@");
+    const newValue = textareaValue.substring(0, lastSpaceIndex) + `@${email} `;
+    if (currentTextarea === "comment") {
+      setComment(newValue);
+    } else {
+      setReplyInputs((prev) => ({ ...prev, [currentTextarea]: newValue }));
+    }
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setCurrentTextarea(null);
+  };
+
+  const statusOptions = [
+    { value: "pending", label: "Pending" },
+    { value: "inProgress", label: "In Progress" },
+    { value: "completed", label: "Completed" },
+  ];
+
+  const priorityOptions = [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ];
+
+  const handleStatusChange = (selectedOption) => {
+    setFormData({ ...formData, status: selectedOption?.value || "pending" });
+  };
+
+  const handlePriorityChange = (selectedOption) => {
+    setFormData({ ...formData, priority: selectedOption?.value || "low" });
+  };
+
+  const handleAssignedToChange = (selectedOptions) => {
+    const selectedEmails = selectedOptions
+      ? selectedOptions.map((option) => option.value)
+      : [];
+    setFormData({ ...formData, assignedTo: selectedEmails });
+  };
+
+  const formatDateOnly = (date) => {
+    if (!date) return "-";
+    return new Date(date).toLocaleDateString("in-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      timeZone: "Asia/Jakarta",
+    });
+  };
+
+  const formatRelativeTime = (date) => {
+    if (!date) return "-";
+    const now = new Date();
+    const time = new Date(date);
+    const diffInSeconds = Math.floor((now - time) / 1000);
+
+    if (diffInSeconds < 60)
+      return `${diffInSeconds} second${diffInSeconds !== 1 ? "s" : ""} ago`;
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    if (diffInMinutes < 60)
+      return `${diffInMinutes} minute${diffInMinutes !== 1 ? "s" : ""} ago`;
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24)
+      return `${diffInHours} hour${diffInHours !== 1 ? "s" : ""} ago`;
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 30)
+      return `${diffInDays} day${diffInDays !== 1 ? "s" : ""} ago`;
+    const diffInMonths = Math.floor(diffInDays / 30);
+    if (diffInMonths < 12)
+      return `${diffInMonths} month${diffInMonths !== 1 ? "s" : ""} ago`;
+    const diffInYears = Math.floor(diffInMonths / 12);
+    return `${diffInYears} year${diffInYears !== 1 ? "s" : ""} ago`;
+  };
+
+  const formatAction = (action) => {
+    const parseTextWithMentions = (text) => {
+      const parts = text.split(/(@[\w.@]+)/g);
+      return parts.map((part, index) =>
+        part.startsWith("@") ? (
+          <span key={index} className="text-blue-500 hover:underline">
+            {part}{" "}
+          </span>
+        ) : (
+          <span key={index}>{part} </span>
+        )
+      );
+    };
+
+    if (action.includes("uploaded file(s):")) {
+      const [userPart, filePart] = action.split(" uploaded file(s): ");
+      return (
+        <>
+          {parseTextWithMentions(userPart)} uploaded file(s):{" "}
+          <span className="font-semibold">{filePart}</span>
+        </>
+      );
+    }
+    if (action.includes("created task")) {
+      const [prefix, title] = action.split("created task ");
+      return (
+        <>
+          {parseTextWithMentions(prefix)} created task{" "}
+          <span className="font-semibold">{title}</span>
+        </>
+      );
+    }
+    if (action.includes("added comment :")) {
+      const [userPart, commentPart] = action.split(" added comment : ");
+      return (
+        <>
+          {parseTextWithMentions(userPart)} added comment:{" "}
+          <span className="font-semibold">
+            {parseTextWithMentions(commentPart)}
+          </span>
+        </>
+      );
+    }
+    if (action.includes("replied to comment")) {
+      const [prefix, replyPart] = action.split(" : ");
+      return (
+        <>
+          {parseTextWithMentions(prefix)}:{" "}
+          <span className="font-semibold">
+            {parseTextWithMentions(replyPart)}
+          </span>
+        </>
+      );
+    }
+    return parseTextWithMentions(action);
   };
 
   const statusColors = {
@@ -426,1003 +512,987 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     }
   };
 
-  const formatDateOnly = (date) => {
-    if (!date) return "-";
-    return new Date(date).toLocaleDateString("in-ID", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      timeZone: "Asia/Jakarta",
-    });
-  };
-
-  const formatRelativeTime = (date) => {
-    if (!date) return "-";
-    const now = new Date();
-    const commentTime = new Date(date);
-    const diffInSeconds = Math.floor((now - commentTime) / 1000);
-
-    if (diffInSeconds < 60) {
-      return `${diffInSeconds} seconds ago`;
-    }
-    const diffInMinutes = Math.floor(diffInSeconds / 60);
-    if (diffInMinutes < 60) {
-      return `${diffInMinutes} minute${diffInMinutes !== 1 ? "s" : ""} ago`;
-    }
-    const diffInHours = Math.floor(diffInMinutes / 60);
-    if (diffInHours < 24) {
-      return `${diffInHours} hour${diffInHours !== 1 ? "s" : ""} ago`;
-    }
-    const diffInDays = Math.floor(diffInHours / 24);
-    if (diffInDays < 30) {
-      return `${diffInDays} day${diffInDays !== 1 ? "s" : ""} ago`;
-    }
-    const diffInMonths = Math.floor(diffInDays / 30);
-    if (diffInMonths < 12) {
-      return `${diffInMonths} month${diffInMonths !== 1 ? "s" : ""} ago`;
-    }
-    const diffInYears = Math.floor(diffInMonths / 12);
-    return `${diffInYears} year${diffInYears !== 1 ? "s" : ""} ago`;
-  };
-
   const completedCount = formData.subtask.filter((sub) => sub.completed).length;
   const totalCount = formData.subtask.length;
   const progressRatio = `${completedCount}/${totalCount || 1}`;
 
-  if (!task)
+  if (!task) {
     return (
       <div className="flex justify-center items-center py-10">
         <Loader className="h-8 w-8 text-font1 animate-spin" />
       </div>
     );
+  }
 
   return (
-    <div className="relative p-6">
-      <div className="mb-4 pb-4 border-b border-borderPrimary w-full">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="border-r border-black-200 pr-2"
-              title="Close"
-            >
-              <X className="h-5 w-5 text-gray-600 hover:text-gray-800" />
-            </button>
-            {task && (
-              <span className="text-gray-500 text-md">
-                Created on {formatDateOnly(task.createdAt)}
-              </span>
-            )}
-          </div>
-          {!isEditing && task && (
-            <div className="flex items-center gap-4">
-              {getStatusIcon(task.status)}
-              <button onClick={() => setIsEditing(true)}>
-                <SquarePen className="w-5 h-5 inline-block mr-1 text-gray-600 hover:text-gray-800" />
-              </button>
-            </div>
-          )}
+    <div className="relative p-6 bg-white min-h-screen ">
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
         </div>
+      )}
+      <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-200 rounded"
+            aria-label="Close task details"
+          >
+            <X className="h-5 w-5 text-gray-600" />
+          </button>
+          <span className="text-gray-500 text-sm">
+            Created on {formatDateOnly(task.createdAt)}
+          </span>
+        </div>
+        {!isEditing && (
+          <div className="flex items-center gap-4">
+            {getStatusIcon(task.status)}
+            <button
+              onClick={() => setIsEditing(true)}
+              className="p-1 hover:bg-gray-200 rounded"
+              aria-label="Edit task"
+            >
+              <SquarePen className="h-5 w-5 text-gray-600" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {task && (
-        <div className="bg-white rounded-md p-2 mb-4">
-          {isEditing ? (
-            <form onSubmit={handleUpdateSubmit} className="grid gap-4">
-              <h3 className="text-2xl font-semibold text-gray-800 mb-4">
-                Edit Tugas
-              </h3>
+      <div className="lg:p-3">
+        {isEditing ? (
+          <form onSubmit={handleUpdateSubmit} className="space-y-4">
+            <h2 className="text-xl font-semibold text-gray-800">Edit Task</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Title
+              </label>
               <input
                 type="text"
                 name="title"
                 value={formData.title}
                 onChange={handleChange}
-                placeholder="Judul tugas"
-                className="p-2 text-sm border border-r-borderPrimary rounded-md focus:ring-2 focus:ring-blue-500"
+                placeholder="Task title"
+                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
                 required
+                aria-required="true"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description
+              </label>
               <textarea
                 name="description"
                 value={formData.description}
                 onChange={handleChange}
-                placeholder="Deskripsi (opsional)"
-                className="p-2 text-sm border border-r-borderPrimary rounded-md focus:ring-2 focus:ring-blue-500"
+                placeholder="Task description (optional)"
+                className="w-full text-justify p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
                 rows="4"
               />
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Status
-                  </label>
-                  <Select
-                    options={statusOptions}
-                    value={statusOptions.find(
-                      (option) => option.value === formData.status
-                    )}
-                    onChange={handleStatusChange}
-                    placeholder="Pilih status..."
-                    className="text-sm"
-                    classNamePrefix="react-select"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Priority
-                  </label>
-                  <Select
-                    options={priorityOptions}
-                    value={priorityOptions.find(
-                      (option) => option.value === formData.priority
-                    )}
-                    onChange={handlePriorityChange}
-                    placeholder="Pilih prioritas..."
-                    className="text-sm"
-                    classNamePrefix="react-select"
-                  />
-                </div>
-              </div>
-              <input
-                type="text"
-                name="tags"
-                value={formData.tags}
-                onChange={handleChange}
-                placeholder="Tags, pisahkan dengan koma (opsional)"
-                className="p-2 text-sm border border-borderPrimary rounded-md focus:ring-2 focus:ring-blue-500"
-              />
-              <div className="grid sm:grid-cols-2 gap-4">
-                <input
-                  type="date"
-                  name="startDate"
-                  value={formData.startDate}
-                  onChange={handleChange}
-                  className="p-2 text-sm border border-borderPrimary rounded-md focus:ring-2 focus:ring-blue-500"
-                />
-                <input
-                  type="date"
-                  name="dueDate"
-                  value={formData.dueDate}
-                  onChange={handleChange}
-                  className="p-2 text-sm border border-borderPrimary rounded-md focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Assigned To
+                  Status
                 </label>
                 <Select
-                  options={userOptions}
-                  isMulti
-                  value={userOptions.filter((option) =>
-                    formData.assignedTo.includes(option.value)
+                  options={statusOptions}
+                  value={statusOptions.find(
+                    (option) => option.value === formData.status
                   )}
-                  onChange={handleAssignedToChange}
-                  placeholder="Pilih pengguna..."
+                  onChange={handleStatusChange}
+                  placeholder="Select status..."
                   className="text-sm"
                   classNamePrefix="react-select"
                 />
               </div>
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">
-                  Subtasks
-                </h4>
-                {formData.subtask.map((sub, index) => (
-                  <div
-                    key={index}
-                    className="flex gap-2 mb-2 items-center text-sm"
-                  >
-                    <input
-                      type="text"
-                      value={sub.title}
-                      onChange={(e) =>
-                        handleSubtaskChange(index, e.target.value)
-                      }
-                      placeholder="Judul subtugas"
-                      className="p-2 border border-borderPrimary rounded-md focus:ring-2 focus:ring-blue-500 flex-1"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSubtask(index)}
-                      className="text-red-600 hover:text-red-800"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addSubtask}
-                  className="text-blue-600 hover:underline text-sm"
-                >
-                  + Add Subtask
-                </button>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Priority
+                </label>
+                <Select
+                  options={priorityOptions}
+                  value={priorityOptions.find(
+                    (option) => option.value === formData.priority
+                  )}
+                  onChange={handlePriorityChange}
+                  placeholder="Select priority..."
+                  className="text-sm"
+                  classNamePrefix="react-select"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Tags
+              </label>
+              <input
+                type="text"
+                name="tags"
+                value={formData.tags}
+                onChange={handleChange}
+                placeholder="Tags, separated by commas (optional)"
+                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  name="startDate"
+                  value={formData.startDate}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                />
               </div>
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">
-                  Attachments
-                </h4>
-                <div
-                  className={`border-2 border-dashed rounded-md p-6 text-center transition-all duration-200 ${
-                    isDragging
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-300 bg-gray-50"
-                  }`}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                >
-                  <Upload
-                    className={`mx-auto h-10 w-10 ${
-                      isDragging ? "text-blue-500" : "text-gray-400"
-                    }`}
-                  />
-                  <p className="mt-2 text-sm text-gray-600">
-                    Drag & drop files here, or{" "}
-                    <button
-                      type="button"
-                      onClick={handleUploadClick}
-                      className="text-blue-600 hover:underline"
-                    >
-                      browse
-                    </button>
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Supports JPEG, PNG, and PDF files
-                  </p>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Due Date
+                </label>
+                <input
+                  type="date"
+                  name="dueDate"
+                  value={formData.dueDate}
+                  onChange={handleChange}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assigned To
+              </label>
+              <CreatableSelect
+                isMulti
+                value={formData.assignedTo.map((email) => ({
+                  value: email,
+                  label: email,
+                }))}
+                onChange={handleAssignedToChange}
+                placeholder="Enter email addresses..."
+                className="text-sm"
+                classNamePrefix="react-select"
+                formatCreateLabel={(input) => `Add "${input}"`}
+                noOptionsMessage={() => "Type an email to add"}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Enter valid email addresses to assign users
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Subtasks
+              </label>
+              {formData.subtask.map((sub, index) => (
+                <div key={index} className="flex gap-2 mb-2 items-center">
                   <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={(e) => handleFileChange(e.target.files)}
-                    multiple
-                    accept="image/jpeg,image/png,application/pdf"
-                    className="hidden"
+                    type="text"
+                    value={sub.title}
+                    onChange={(e) => handleSubtaskChange(index, e.target.value)}
+                    placeholder="Subtask title"
+                    className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
                   />
+                  <button
+                    type="button"
+                    onClick={() => removeSubtask(index)}
+                    className="text-red-600 hover:text-red-800"
+                    aria-label="Remove subtask"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
                 </div>
-                {formData.attachment.length > 0 && (
-                  <div className="mt-4 space-y-2">
-                    {formData.attachment.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between bg-gray-100 p-2 rounded-md"
-                      >
-                        <div className="flex items-center gap-2">
-                          {file.type === "application/pdf" ? (
-                            <svg
-                              className="w-6 h-6 text-red-500"
-                              fill="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
-                            </svg>
-                          ) : (
-                            <svg
-                              className="w-6 h-6 text-blue-500"
-                              fill="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-                            </svg>
-                          )}
-                          <div>
-                            <p className="text-sm font-medium">{file.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {(file.size / (1024 * 1024)).toFixed(2)} MB
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveFile(index)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 "
-                >
-                  Save Changes
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : (
-            <>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-semibold text-gray-800">
-                  {task.title || "Tanpa judul"}
-                </h2>
-              </div>
-
-              <div className="mt-4 flex gap-2 flex-wrap">
-                <span
-                  className={`px-2 py-1 rounded text-xs font-medium capitalize ${
-                    statusColors[task.status] || "bg-gray-100 text-gray-800"
+              ))}
+              <button
+                type="button"
+                onClick={addSubtask}
+                className="text-blue-600 hover:underline text-sm"
+              >
+                + Add Subtask
+              </button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Attachments
+              </label>
+              <div
+                className={`border-2 border-dashed rounded-md p-6 text-center ${
+                  isDragging
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-300 bg-gray-50"
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <Upload
+                  className={`mx-auto h-8 w-8 ${
+                    isDragging ? "text-blue-500" : "text-gray-400"
                   }`}
-                >
-                  {task.status || "Unknown"}
-                </span>
-                <span
-                  className={`px-2 py-1 rounded text-xs font-medium capitalize ${
-                    priorityColors[task.priority] ||
-                    "bg-gray-100 text-gray-800 border-gray-200"
-                  }`}
-                >
-                  {task.priority
-                    ? `${task.priority} Priority`
-                    : "Unknown Priority"}
-                </span>
+                />
+                <p className="mt-2 text-sm text-gray-600">
+                  Drag & drop files, or{" "}
+                  <button
+                    type="button"
+                    onClick={handleUploadClick}
+                    className="text-blue-600 hover:underline"
+                    aria-label="Browse files"
+                  >
+                    browse
+                  </button>
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Supports JPEG, PNG, PDF
+                </p>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={(e) => handleFileChange(e.target.files)}
+                  multiple
+                  accept="image/jpeg,image/png,application/pdf"
+                  className="hidden"
+                />
               </div>
-
-              <div className="space-y-4 mt-5">
-                <div className="flex items-center gap-2">
-                  <UserRoundPen className="h-5 w-5 text-gray-700" />
-                  {task.owner ? (
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium text-sm"
-                        style={{
-                          backgroundColor: getInitialsAndColor(
-                            task.owner.username
-                          ).color,
-                        }}
-                      >
-                        {task.owner.avatar ? (
-                          <img
-                            src={task.owner.avatar}
-                            alt={task.owner.username}
-                            className="w-full h-full rounded-full object-cover"
-                          />
-                        ) : (
-                          getInitialsAndColor(task.owner.username).initials
-                        )}
-                      </span>
-                      <p className="capitalize bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
-                        {task.owner.username} (owner)
-                      </p>
-                    </div>
-                  ) : (
-                    "Unknown"
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <UsersRound className="h-5 w-5 text-gray-700" />
-                  {Array.isArray(task.assignedTo) &&
-                  task.assignedTo.length > 0 ? (
-                    <div className="flex">
-                      {task.assignedTo.map((user, index) => {
-                        const { initials, color } = getInitialsAndColor(
-                          user.username
-                        );
-                        return (
-                          <div
-                            key={index}
-                            className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-sm border-2 border-white ${
-                              index > 0 ? "ml-[-8px]" : ""
-                            }`}
-                            style={{
-                              backgroundColor: color,
-                              zIndex: task.assignedTo.length - index,
-                            }}
-                            title={user.username}
-                          >
-                            {user.avatar ? (
-                              <img
-                                src={user.avatar}
-                                alt={user.username}
-                                className="w-full h-full rounded-full object-cover"
-                              />
-                            ) : (
-                              <span className="w-full h-full flex items-center justify-center">
-                                {initials}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    "-"
-                  )}
-                </div>
-                <div className="flex gap-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <CalendarClock className="h-5 w-5 text-gray-700" />
-                    <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
-                      {formatDateOnly(task.startDate)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CalendarCheck2 className="h-5 w-5 text-gray-700" />
-                    <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
-                      {formatDateOnly(task.dueDate)}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2 text-sm ">
-                  <Tags className="h-5 w-5 text-gray-700" />
-                  <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
-                    {Array.isArray(task.tags) && task.tags.length > 0
-                      ? task.tags.join(", ")
-                      : "-"}
-                  </p>
-                </div>
-              </div>
-              {Array.isArray(task.attachment) && task.attachment.length > 0 && (
-                <div className="mt-6">
-                  <div className="flex items-center gap-2">
-                    <Paperclip className="h-5 w-5 text-gray-700" />
-                    <h1 className="text-md font-semibold text-font1 ">
-                      Attachment ({task.attachment.length})
-                    </h1>
-                  </div>
-                  <div className="mt-2 border border-borderPrimary p-4 rounded-md bg-white">
-                    <div className="space-y-4 h-auto pr-2">
-                      {(isPreviewOpen
-                        ? task.attachment
-                        : task.attachment.slice(0, 2)
-                      ).map((attachment, index) => (
-                        <div
-                          key={index}
-                          className="flex items-start gap-3 w-full"
-                        >
-                          <div className="mr-2">
-                            {getFileType(attachment.originalName) === "PDF" ? (
-                              <svg
-                                className="w-6 h-6 text-red-500"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
-                              </svg>
-                            ) : getFileType(attachment.originalName) ===
-                              "Image" ? (
-                              <svg
-                                className="w-6 h-6 text-blue-500"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-                              </svg>
-                            ) : (
-                              <svg
-                                className="w-6 h-6 text-gray-500"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
-                              </svg>
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">
-                              {attachment.originalName}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {getFileType(attachment.originalName)} ·{" "}
-                              {attachment.size || "N/A"}mb
-                            </p>
-                          </div>
-                          <button
-                            onClick={() =>
-                              handleDownload(attachment.originalName)
-                            }
-                            className="text-blue-600 hover:underline text-sm"
-                          >
-                            <CloudDownload className="w-5 h-5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {task.attachment.length > 2 && (
-                    <button
-                      onClick={() => setIsPreviewOpen(!isPreviewOpen)}
-                      className="mt-2 text-blue-600 hover:underline text-sm"
+              {formData.attachment.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {formData.attachment.map((file, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between border border-borderPrimary p-2 rounded-md text-sm"
                     >
-                      {isPreviewOpen
-                        ? "Hide attachments"
-                        : "Preview all attachments"}
-                    </button>
-                  )}
-                  <div className="mt-6">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-5 w-5 text-gray-700" />
-                      <h1 className="text-md font-semibold text-font1">
-                        Task Description
-                      </h1>
+                      <div className="flex items-start gap-2 p-3">
+                        {file.type === "application/pdf" ? (
+                          <svg
+                            className="w-5 h-5 text-red-500"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
+                          </svg>
+                        ) : (
+                          <svg
+                            className="w-5 h-5 text-blue-500"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+                          </svg>
+                        )}
+                        <div>
+                          <p className="text-sm break-words">{file.name}</p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {getFileType(file.name)} -{" "}
+                            {(file.size / (1024 * 1024)).toFixed(2)} MB
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(index)}
+                        className="text-red-600 hover:text-red-800"
+                        aria-label="Remove file"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </button>
                     </div>
-                    <p className="p-4 text-justify text-gray-600 mt-2 border border-borderPrimary text-sm rounded-md">
-                      {task.description || "Tanpa deskripsi"}
-                    </p>
-                  </div>
+                  ))}
                 </div>
               )}
-              <div className="mt-6">
-                <div className="flex border-b border-gray-200 mb-4 text-sm">
-                  <button
-                    className={`flex items-center px-4 py-2 ${
-                      activeTab === "subtasks"
-                        ? "border-b-2 border-blue-600 text-blue-600"
-                        : "text-gray-600 hover:text-gray-800"
-                    }`}
-                    onClick={() => setActiveTab("subtasks")}
-                  >
-                    Subtasks
-                  </button>
-                  <button
-                    className={`flex items-center px-4 py-2 ${
-                      activeTab === "comments"
-                        ? "border-b-2 border-blue-600 text-blue-600"
-                        : "text-gray-600 hover:text-gray-800"
-                    }`}
-                    onClick={() => setActiveTab("comments")}
-                  >
-                    Comments
-                  </button>
-                  <button
-                    className={`flex items-center px-4 py-2 ${
-                      activeTab === "recentActivity"
-                        ? "border-b-2 border-blue-600 text-blue-600"
-                        : "text-gray-600 hover:text-gray-800"
-                    }`}
-                    onClick={() => setActiveTab("recentActivity")}
-                  >
-                    Recent Activity
-                  </button>
-                </div>
-
-                {activeTab === "subtasks" && (
-                  <div>
-                    {Array.isArray(task.subtask) && task.subtask.length > 0 ? (
-                      <div className=" border border-borderPrimary p-4 rounded-md bg-white">
-                        <div className="mb-2 text-sm flex items-center gap-2 border-b border-borderPrimary pb-2">
-                          <ListTodo className="h-5 w-5 text-gray-700" />
-                          <span className="mr-2">Subtask</span>
-                          <div className="flex-1">
-                            <div className="w-full bg-gray-200 rounded-full h-2.5">
-                              <div
-                                className="bg-blue-600 h-2.5 rounded-full"
-                                style={{
-                                  width: `${
-                                    (completedCount / totalCount) * 100
-                                  }%`,
-                                }}
-                              ></div>
-                            </div>
-                          </div>
-                          <span className="ml-2 text-sm text-gray-600">
-                            {progressRatio}
-                          </span>
-                        </div>
-                        <ul className="mt-2 space-y-2 text-[14px]">
-                          {formData.subtask.map((sub, index) => (
-                            <li
-                              key={index}
-                              className="flex items-center gap-2 text-gray-600"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={sub.completed}
-                                onChange={() => handleSubtaskToggle(index)}
-                                className="cursor-pointer w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                                disabled={isEditing}
-                              />
-                              <span
-                                className={
-                                  sub.completed
-                                    ? "line-through text-gray-400"
-                                    : ""
-                                }
-                              >
-                                {sub.title}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : (
-                      <p className="text-gray-500">No subtasks.</p>
-                    )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 "
+              >
+                Save Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200
+"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+              {task.title || "Untitled"}
+            </h2>
+            <div className="flex gap-2 mb-4">
+              <span
+                className={`px-2 py-1 rounded text-xs font-medium capitalize ${
+                  statusColors[task.status] || "bg-gray-100 text-gray-800"
+                }`}
+              >
+                {task.status || "Unknown"}
+              </span>
+              <span
+                className={`px-2 py-1 rounded text-xs font-medium capitalize ${
+                  priorityColors[task.priority] || "bg-gray-100 text-gray-800"
+                }`}
+              >
+                {task.priority ? `${task.priority} Priority` : "No Priority"}
+              </span>
+            </div>
+            <div className="space-y-4 mt-5">
+              <div className="flex items-center gap-2">
+                <UserRoundPen className="h-5 w-5 text-gray-700" />
+                {task.owner ? (
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium text-sm"
+                      style={{
+                        backgroundColor: getInitialsAndColor(
+                          task.owner.username
+                        ).color,
+                      }}
+                    >
+                      {task.owner.avatar ? (
+                        <img
+                          src={task.owner.avatar}
+                          alt={task.owner.username}
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        getInitialsAndColor(task.owner.username).initials
+                      )}
+                    </span>
+                    <p className="capitalize bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
+                      {task.owner.username} (owner)
+                    </p>
                   </div>
+                ) : (
+                  "Unknown"
                 )}
-                {activeTab === "comments" && (
-                  <div>
-                    <div className="mt-4 text-sm">
-                      {Array.isArray(task.comments) &&
-                      task.comments.length > 0 ? (
-                        task.comments.map((c, index) => (
-                          <div key={index} className="border-t pt-2 mt-2">
-                            <p className="flex items-center gap-2">
-                              <span
-                                className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium"
+              </div>
+              <div className="flex items-center gap-2">
+                <UsersRound className="h-5 w-5 text-gray-700" />
+                {Array.isArray(task.assignedTo) &&
+                task.assignedTo.length > 0 ? (
+                  <div className="flex">
+                    {task.assignedTo.map((user, index) => {
+                      const { initials, color } = getInitialsAndColor(
+                        user.username
+                      );
+                      return (
+                        <div
+                          key={index}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-sm border-2 border-white ${
+                            index > 0 ? "ml-[-8px]" : ""
+                          }`}
+                          style={{
+                            backgroundColor: color,
+                            zIndex: task.assignedTo.length - index,
+                          }}
+                          title={user.username}
+                        >
+                          {user.avatar ? (
+                            <img
+                              src={user.avatar}
+                              alt={user.username}
+                              className="w-full h-full rounded-full object-cover"
+                            />
+                          ) : (
+                            <span className="w-full h-full flex items-center justify-center">
+                              {initials}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  "-"
+                )}
+              </div>
+              <div className="flex gap-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="h-5 w-5 text-gray-700" />
+                  <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
+                    {formatDateOnly(task.startDate)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CalendarCheck2 className="h-5 w-5 text-gray-700" />
+                  <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
+                    {formatDateOnly(task.dueDate)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 text-sm ">
+                <Tags className="h-5 w-5 text-gray-700" />
+                <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
+                  {Array.isArray(task.tags) && task.tags.length > 0
+                    ? task.tags.join(", ")
+                    : "-"}
+                </p>
+              </div>
+            </div>
+            <div className="mt-6">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="h-5 w-5 text-gray-600" />
+                <h3 className="text-sm font-semibold">Description</h3>
+              </div>
+              <div className="overflow-auto w-full">
+                <p className="text-justify p-4 break-words border border-borderPrimary bg-white rounded-md text-sm text-gray-600 ">
+                  {task.description || "No description provided."}
+                </p>
+              </div>
+            </div>
+            {task.attachment?.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <Paperclip className="h-5 w-5 text-gray-600" />
+                  <h3 className="text-sm font-semibold">
+                    Attachments ({task.attachment.length})
+                  </h3>
+                </div>
+                <div className="space-y-2">
+                  {(isPreviewOpen
+                    ? task.attachment
+                    : task.attachment.slice(0, 2)
+                  ).map((attachment, index) => (
+                    <div
+                      key={index}
+                      className="flex items-start justify-between border border-gray-200 p-4 rounded-md text-sm"
+                    >
+                      <div className="flex items-start gap-3">
+                        {getFileType(attachment.originalName) === "PDF" ? (
+                          <svg
+                            className="w-6 h-6 text-red-500"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
+                          </svg>
+                        ) : (
+                          <svg
+                            className="w-6 h-6 text-blue-500"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+                          </svg>
+                        )}
+                        <div>
+                          <p className="text-sm font-medium break-words">
+                            {attachment.originalName}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {getFileType(attachment.originalName)} -{" "}
+                            {attachment.size} MB
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDownload(attachment.originalName)}
+                        className="text-blue-600 hover:underline"
+                        aria-label={`Download ${attachment.originalName}`}
+                      >
+                        <CloudDownload className="h-5 w-5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {task.attachment.length > 2 && (
+                  <button
+                    onClick={() => setIsPreviewOpen(!isPreviewOpen)}
+                    className="mt-2 text-blue-600 hover:underline text-sm"
+                  >
+                    {isPreviewOpen ? "Show less" : "Show all attachments"}
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="mt-6">
+              <div className="flex border-b border-gray-200 mb-4 text-sm">
+                {["subtasks", "comments", "recentActivity"].map((tab) => (
+                  <button
+                    key={tab}
+                    className={`px-4 py-2 ${
+                      activeTab === tab
+                        ? "border-b-2 border-font1 text-font1"
+                        : "text-gray-600 hover:text-gray-800"
+                    } capitalize`}
+                    onClick={() => setActiveTab(tab)}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              {activeTab === "subtasks" && (
+                <div>
+                  {task.subtask?.length > 0 ? (
+                    <div className="border border-gray-200 p-4 rounded-md">
+                      <div className="flex items-center gap-2 mb-2">
+                        <ListTodo className="h-5 w-5 text-gray-600" />
+                        <span className="text-sm font-semibold">Subtasks</span>
+                        <div className="flex-1 ml-2">
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full"
+                              style={{
+                                width: `${
+                                  (completedCount / totalCount) * 100
+                                }%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <span className="text-xs text-gray-600">
+                          {progressRatio}
+                        </span>
+                      </div>
+                      <ul className="space-y-2">
+                        {formData.subtask.map((sub, index) => (
+                          <li
+                            key={index}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={sub.completed}
+                              onChange={() => handleSubtaskToggle(index)}
+                              className="h-4 w-4 text-blue-600 rounded"
+                              disabled={isEditing}
+                            />
+                            <span
+                              className={
+                                sub.completed
+                                  ? "line-through text-gray-500"
+                                  : ""
+                              }
+                            >
+                              {sub.title || "Untitled subtask"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm">No subtasks.</p>
+                  )}
+                </div>
+              )}
+              {activeTab === "comments" && (
+                <div>
+                  {task.comments?.length > 0 ? (
+                    <div className="space-y-4">
+                      {task.comments.map((c) => (
+                        <div key={c._id} className="border-t pt-4">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-start gap-2">
+                              <div
+                                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm"
                                 style={{
                                   backgroundColor: getInitialsAndColor(
-                                    c.user?.username
+                                    c.user?.username || "Unknown"
                                   ).color,
                                 }}
                               >
-                                {c.user?.avatar ? (
+                                {c.user.avatar ? (
                                   <img
                                     src={c.user.avatar}
-                                    alt={c.user.username}
-                                    className="w-full h-full rounded-full object-cover"
+                                    alt="Avatar"
+                                    className="w-9 h-9 rounded-full object-cover"
                                   />
                                 ) : (
-                                  getInitialsAndColor(c.user?.username).initials
+                                  getInitialsAndColor(
+                                    c.user?.username || "Unknown"
+                                  ).initials
                                 )}
-                              </span>
-                              <p className="font-semibold">
-                                {c.user?.username || "Unknown"}
-                              </p>
-                              <span className="text-gray-500">
-                                {formatRelativeTime(c.createdAt)}
-                              </span>
-                            </p>
-                            <p className="text-gray-600 ml-10">{c.comment}</p>
-                            <button
-                              onClick={() =>
-                                setReplyInputs((prev) => ({
-                                  ...prev,
-                                  [c._id]: prev[c._id] || "",
-                                }))
-                              }
-                              className="text-blue-600 hover:underline text-sm mt-1 ml-10"
-                            >
-                              Reply
-                            </button>
-                            {replyInputs[c._id] !== undefined && (
-                              <form
-                                onSubmit={(e) =>
-                                  handleReplySubmit(c._id, c._id, e)
-                                }
-                                className="mt-2 ml-14 text-sm"
-                              >
-                                <textarea
-                                  value={replyInputs[c._id] || ""}
-                                  onChange={(e) =>
-                                    handleReplyInputChange(
-                                      c._id,
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder="Tulis balasan..."
-                                  className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500"
-                                  rows="3"
-                                />
-                                <div className="flex gap-2">
-                                  <button
-                                    type="submit"
-                                    className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 "
-                                  >
-                                    Send Reply
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setReplyInputs((prev) => {
-                                        const { [c._id]: _, ...rest } = prev;
-                                        return rest;
-                                      })
-                                    }
-                                    className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </form>
-                            )}
-                            {Array.isArray(c.replies) &&
-                              c.replies.length > 0 && (
-                                <div className="ml-14 mt-2 text-sm">
-                                  {c.replies.map((reply, replyIndex) => (
-                                    <div
-                                      key={replyIndex}
-                                      className="border-t pt-2 mt-2"
-                                    >
-                                      <p className="flex items-center gap-2">
-                                        <span
-                                          className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium"
-                                          style={{
-                                            backgroundColor:
-                                              getInitialsAndColor(
-                                                reply.user?.username
-                                              ).color,
-                                          }}
-                                        >
-                                          {reply.user?.avatar ? (
-                                            <img
-                                              src={reply.user.avatar}
-                                              alt={reply.user.username}
-                                              className="w-full h-full rounded-full object-cover"
-                                            />
-                                          ) : (
-                                            getInitialsAndColor(
-                                              reply.user?.username
-                                            ).initials
-                                          )}
-                                        </span>
-                                        <strong>
-                                          {reply.user?.username || "Unknown"}
-                                        </strong>
-                                        <span className="text-gray-500">
-                                          {formatRelativeTime(reply.createdAt)}
-                                        </span>
-                                      </p>
-                                      <p className="text-gray-600 ml-10">
-                                        {reply.comment}
-                                      </p>
-                                      <button
-                                        onClick={() =>
-                                          setReplyInputs((prev) => ({
-                                            ...prev,
-                                            [reply._id]: prev[reply._id] || "",
-                                          }))
-                                        }
-                                        className="text-blue-600 hover:underline text-sm mt-1 ml-10"
-                                      >
-                                        Reply
-                                      </button>
-                                      {replyInputs[reply._id] !== undefined && (
-                                        <form
-                                          onSubmit={(e) =>
-                                            handleReplySubmit(
-                                              c._id,
-                                              reply._id,
-                                              e
-                                            )
-                                          }
-                                          className="mt-2 ml-14"
-                                        >
-                                          <textarea
-                                            value={replyInputs[reply._id] || ""}
-                                            onChange={(e) =>
-                                              handleReplyInputChange(
-                                                reply._id,
-                                                e.target.value
-                                              )
-                                            }
-                                            placeholder="Tulis balasan..."
-                                            className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500"
-                                            rows="3"
-                                          />
-                                          <div className="flex gap-2">
-                                            <button
-                                              type="submit"
-                                              className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200"
-                                            >
-                                              Send Reply
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                setReplyInputs((prev) => {
-                                                  const {
-                                                    [reply._id]: _,
-                                                    ...rest
-                                                  } = prev;
-                                                  return rest;
-                                                })
-                                              }
-                                              className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200"
-                                            >
-                                              Cancel
-                                            </button>
-                                          </div>
-                                        </form>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-gray-500">No comments.</p>
-                      )}
-                    </div>
-                    <form
-                      onSubmit={handleCommentSubmit}
-                      className="mt-4 text-sm"
-                    >
-                      <textarea
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="Tambah komentar"
-                        className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500"
-                        rows="4"
-                      />
-                      <button
-                        type="submit"
-                        className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200"
-                      >
-                        Send
-                      </button>
-                    </form>
-                  </div>
-                )}
-                {activeTab === "recentActivity" && (
-                  <div>
-                    <div className="border border-borderPrimary p-5 rounded-md bg-white ">
-                      <div
-                        className={`space-y-4 ${
-                          activities.length === 0
-                            ? "h-auto"
-                            : activities.length > 3
-                            ? "h-[350px]"
-                            : ""
-                        } overflow-y-auto pr-2`}
-                      >
-                        {activities.length > 0 ? (
-                          activities.map((activity, index) => (
-                            <div key={index} className="flex items-start gap-3">
-                              {activity.files && activity.files.length > 0 ? (
-                                <div className="flex items-start gap-3 w-full">
-                                  <div
-                                    className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 mt-1"
-                                    style={{
-                                      backgroundColor: getInitialsAndColor(
-                                        activity.user
-                                      ).color,
-                                    }}
-                                  >
-                                    {
-                                      getInitialsAndColor(activity.user)
-                                        .initials
-                                    }
-                                  </div>
-                                  <div className="flex-1">
-                                    <p className="text-sm text-gray-600">
-                                      {activity.action}{" "}
+                              </div>
+                              <div className="flex flex-col">
+                                <div className="flex items-center">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-semibold">
+                                      {c.user?.username || "Unknown"}
                                     </p>
-                                    <div className="mt-2 w-[350px]">
-                                      {activity.files.map((file, fileIndex) => (
-                                        <div
-                                          key={fileIndex}
-                                          className="flex items-center bg-gray-100 p-2 rounded-md mb-2"
-                                        >
-                                          <div className="mr-2 ">
-                                            {getFileType(file.name) ===
-                                            "PDF" ? (
-                                              <svg
-                                                className="w-6 h-6 text-red-500"
-                                                fill="currentColor"
-                                                viewBox="0 0 24 24"
-                                              >
-                                                <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
-                                              </svg>
-                                            ) : getFileType(file.name) ===
-                                              "Image" ? (
-                                              <svg
-                                                className="w-6 h-6 text-blue-500"
-                                                fill="currentColor"
-                                                viewBox="0 0 24 24"
-                                              >
-                                                <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-                                              </svg>
-                                            ) : (
-                                              <svg
-                                                className="w-6 h-6 text-gray-500"
-                                                fill="currentColor"
-                                                viewBox="0 0 24 24"
-                                              >
-                                                <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
-                                              </svg>
+                                    <p className="text-gray-500 text-xs">
+                                      ( {c.user?.email} )
+                                    </p>
+                                  </div>
+                                  <p className="text-gray-500 text-xs ml-2">
+                                    {formatRelativeTime(c.createdAt)}
+                                  </p>
+                                </div>
+                                <div className="mb-3 border border-borderPrimary bg-gray-50 p-2 rounded-md">
+                                  <p className="break-words w-[400px] text-sm text-gray-600 mt-1 ">
+                                    {formatAction(c.comment)}
+                                  </p>
+                                  <button
+                                    onClick={() =>
+                                      setReplyInputs((prev) => ({
+                                        ...prev,
+                                        [c._id]: prev[c._id] || "",
+                                      }))
+                                    }
+                                    className=" text-blue-600 hover:underline text-sm mt-2"
+                                  >
+                                    Reply
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          {replyInputs[c._id] !== undefined && (
+                            <form
+                              onSubmit={(e) =>
+                                handleReplySubmit(c._id, c._id, e)
+                              }
+                              className="ml-10 mt-2 relative"
+                            >
+                              <textarea
+                                value={replyInputs[c._id] || ""}
+                                onChange={(e) =>
+                                  handleReplyInputChange(c._id, e.target.value)
+                                }
+                                placeholder="Write a reply (@email to mention)"
+                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                                rows="3"
+                              />
+                              {showSuggestions && currentTextarea === c._id && (
+                                <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg max-h-full overflow-y-auto w-full mt-1">
+                                  {suggestions.length > 0 ? (
+                                    suggestions.map((user) => (
+                                      <li
+                                        key={user.email}
+                                        onClick={() =>
+                                          handleSelectMention(user.email)
+                                        }
+                                        className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                                      >
+                                        {user.email}
+                                      </li>
+                                    ))
+                                  ) : (
+                                    <li className="px-3 py-2 text-sm text-gray-500">
+                                      No matches found
+                                    </li>
+                                  )}
+                                </ul>
+                              )}
+                              <div className="flex gap-2 mt-2">
+                                <button
+                                  type="submit"
+                                  className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 
+"
+                                >
+                                  Send
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReplyInputs((prev) => {
+                                      const { [c._id]: _, ...rest } = prev;
+                                      return rest;
+                                    })
+                                  }
+                                  className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200
+"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
+                          )}
+                          {c.replies?.length > 0 && (
+                            <div className="ml-10 mt-2 space-y-4">
+                              {c.replies.map((reply) => (
+                                <div key={reply._id} className="border-t pt-4">
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex items-start gap-2">
+                                      <div
+                                        className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm"
+                                        style={{
+                                          backgroundColor: getInitialsAndColor(
+                                            reply.user?.username || "Unknown"
+                                          ).color,
+                                        }}
+                                      >
+                                        {reply.user.avatar ? (
+                                          <img
+                                            src={reply.user.avatar}
+                                            alt="Avatar"
+                                            className="w-9 h-9 rounded-full object-cover"
+                                          />
+                                        ) : (
+                                          getInitialsAndColor(
+                                            reply.user?.email || "Unknown"
+                                          ).initials
+                                        )}
+                                      </div>
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center">
+                                          <div className="flex items-center gap-2">
+                                            <p className="font-semibold">
+                                              {reply.user?.username ||
+                                                "Unknown"}
+                                            </p>
+                                            <p className="text-gray-500 text-xs">
+                                              ( {reply.user?.email} )
+                                            </p>
+                                          </div>
+                                          <p className="text-gray-500 text-xs ml-2">
+                                            {formatRelativeTime(
+                                              reply.createdAt
                                             )}
-                                          </div>
-                                          <div className="flex-1">
-                                            <p className="text-sm font-medium">
-                                              {file.name}
-                                            </p>
-                                            <p className="text-xs text-gray-500">
-                                              {getFileType(file.name)} ·{" "}
-                                              {file.size || "N/A"}mb
-                                            </p>
-                                          </div>
+                                          </p>
+                                        </div>
+                                        <div className="border border-borderPrimary bg-gray-50 p-2 rounded-md">
+                                          <p className="break-words w-[300px]  text-sm text-gray-600 mt-1 ">
+                                            {formatAction(reply.comment)}
+                                          </p>
                                           <button
                                             onClick={() =>
-                                              handleDownload(file.name)
+                                              setReplyInputs((prev) => ({
+                                                ...prev,
+                                                [reply._id]:
+                                                  prev[reply._id] || "",
+                                              }))
                                             }
-                                            className="text-blue-600 hover:underline text-sm"
+                                            className=" text-blue-600 hover:underline text-sm mt-2"
                                           >
-                                            <CloudDownload className="w-5 h-5" />
+                                            Reply
                                           </button>
                                         </div>
-                                      ))}
+                                      </div>
                                     </div>
-                                    <p className="text-xs text-gray-400 mt-1">
-                                      {activity.createdAt
-                                        ? `${new Date(
-                                            activity.createdAt
-                                          ).toLocaleDateString("in-ID", {
-                                            day: "2-digit",
-                                            month: "long",
-                                            year: "numeric",
-                                            timeZone: "Asia/Jakarta",
-                                          })} - ${new Date(
-                                            activity.createdAt
-                                          ).toLocaleTimeString("in-ID", {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                            hour12: true,
-                                            timeZone: "Asia/Jakarta",
-                                          })}`
-                                        : "Tanggal tidak tersedia"}
-                                    </p>
                                   </div>
+                                  {replyInputs[reply._id] !== undefined && (
+                                    <form
+                                      onSubmit={(e) =>
+                                        handleReplySubmit(c._id, reply._id, e)
+                                      }
+                                      className="ml-10 mt-2 relative"
+                                    >
+                                      <textarea
+                                        value={replyInputs[reply._id] || ""}
+                                        onChange={(e) =>
+                                          handleReplyInputChange(
+                                            reply._id,
+                                            e.target.value
+                                          )
+                                        }
+                                        placeholder="Write a reply (@email to mention)"
+                                        className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                                        rows="3"
+                                      />
+                                      {showSuggestions &&
+                                        currentTextarea === reply._id && (
+                                          <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg max-h-full  w-full mt-1">
+                                            {suggestions.length > 0 ? (
+                                              suggestions.map((user) => (
+                                                <li
+                                                  key={user.email}
+                                                  onClick={() =>
+                                                    handleSelectMention(
+                                                      user.email
+                                                    )
+                                                  }
+                                                  className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                                                >
+                                                  {user.email}
+                                                </li>
+                                              ))
+                                            ) : (
+                                              <li className="px-3 py-2 text-sm text-gray-500">
+                                                No matches found
+                                              </li>
+                                            )}
+                                          </ul>
+                                        )}
+                                      <div className="flex gap-2 mt-2">
+                                        <button
+                                          type="submit"
+                                          className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 "
+                                        >
+                                          Send
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setReplyInputs((prev) => {
+                                              const {
+                                                [reply._id]: _,
+                                                ...rest
+                                              } = prev;
+                                              return rest;
+                                            })
+                                          }
+                                          className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </form>
+                                  )}
                                 </div>
-                              ) : (
-                                <div className="flex items-start gap-3 w-full">
-                                  <div
-                                    className="w-10 h-10 text-sm rounded-full flex items-center justify-center text-white font-semibold mt-1 flex-shrink-0"
-                                    style={{
-                                      backgroundColor: getInitialsAndColor(
-                                        activity.user
-                                      ).color,
-                                    }}
-                                  >
-                                    {
-                                      getInitialsAndColor(activity.user)
-                                        .initials
-                                    }
-                                  </div>
-                                  <div className="flex-1">
-                                    <p className="text-sm text-gray-600">
-                                      {activity.action}{" "}
-                                    </p>
-                                    <p className="text-xs text-gray-400 mt-1">
-                                      {activity.createdAt
-                                        ? `${new Date(
-                                            activity.createdAt
-                                          ).toLocaleDateString("in-ID", {
-                                            day: "2-digit",
-                                            month: "long",
-                                            year: "numeric",
-                                            timeZone: "Asia/Jakarta",
-                                          })} - ${new Date(
-                                            activity.createdAt
-                                          ).toLocaleTimeString("in-ID", {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                            hour12: true,
-                                            timeZone: "Asia/Jakarta",
-                                          })}`
-                                        : "Tanggal tidak tersedia"}
-                                    </p>
-                                  </div>
-                                </div>
-                              )}
+                              ))}
                             </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm">No comments yet.</p>
+                  )}
+                  <form
+                    onSubmit={handleCommentSubmit}
+                    className="mt-4 relative"
+                  >
+                    <textarea
+                      value={comment}
+                      onChange={(e) => handleMentionInput(e.target.value)}
+                      placeholder="Write a comment (@email to mention)"
+                      className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                      rows="4"
+                    />
+                    {showSuggestions && currentTextarea === "comment" && (
+                      <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow max-h-full overflow-y-auto w-full mt-1">
+                        {suggestions.length > 0 ? (
+                          suggestions.map((user) => (
+                            <li
+                              key={user.email}
+                              onClick={() => handleSelectMention(user.email)}
+                              className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                            >
+                              {user.email}
+                            </li>
                           ))
                         ) : (
-                          <div className="flex items-center justify-center gap-2">
-                            <Activity className="w-6 h-6 text-gray-500" />
-                            <p className="text-gray-500 text-center py-4">
-                              No recent activity
+                          <li className="px-3 py-2 text-sm text-gray-500">
+                            No matches found
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                    <button
+                      type="submit"
+                      className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 
+"
+                    >
+                      Send
+                    </button>
+                  </form>
+                </div>
+              )}
+              {activeTab === "recentActivity" && (
+                <div>
+                  {activities.length > 0 ? (
+                    <div className="border border-gray-200 p-4 rounded-md max-h-96 overflow-y-auto">
+                      {activities.map((activity) => (
+                        <div
+                          key={activity._id}
+                          className="flex gap-3 py-2 border-b last:border-b-0"
+                        >
+                          <span
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm"
+                            style={{
+                              backgroundColor: getInitialsAndColor(
+                                activity.user || "Unknown"
+                              ).color,
+                            }}
+                          >
+                            {activity.avatar ? (
+                              <img
+                                src={activity.avatar}
+                                alt="Avatar"
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              getInitialsAndColor(activity.user || "Unknown")
+                                .initials
+                            )}
+                          </span>
+                          <div className="flex-1 overflow-auto">
+                            <div className="border border-borderPrimary bg-gray-50 p-2 rounded-md">
+                              <p className="text-sm break-words text-gray-600">
+                                {formatAction(activity.action)}
+                              </p>
+                            </div>
+                            {activity.files?.length > 0 && (
+                              <div className="mt-2 space-y-2">
+                                {activity.files.map((file, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex items-start gap-2 border border-borderPrimary bg-gray-50 p-3 rounded-md cursor-pointer hover:bg-gray-100 transition duration-200"
+                                  >
+                                    {getFileType(file.name) === "PDF" ? (
+                                      <svg
+                                        className="w-5 h-5 text-red-500"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zM6 20V4h7v5h5v11H6z" />
+                                      </svg>
+                                    ) : (
+                                      <svg
+                                        className="w-5 h-5 text-blue-500"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+                                      </svg>
+                                    )}
+                                    <div>
+                                      <p className="text-sm">{file.name}</p>
+                                      <p className="mt-1 text-xs text-gray-500">
+                                        {getFileType(file.name)} - {file.size}{" "}
+                                        MB
+                                      </p>
+                                    </div>
+                                    <button
+                                      onClick={() => handleDownload(file.name)}
+                                      className="ml-auto text-blue-600 hover:underline"
+                                      aria-label={`Download ${file.name}`}
+                                    >
+                                      <CloudDownload className="h-5 w-5" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-500 mt-1">
+                              {activity.createdAt
+                                ? `${new Date(
+                                    activity.createdAt
+                                  ).toLocaleDateString("in-ID", {
+                                    day: "2-digit",
+                                    month: "long",
+                                    year: "numeric",
+                                    timeZone: "Asia/Jakarta",
+                                  })} - ${new Date(
+                                    activity.createdAt
+                                  ).toLocaleTimeString("in-ID", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: true,
+                                    timeZone: "Asia/Jakarta",
+                                  })}`
+                                : "-"}
                             </p>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
+                  ) : (
+                    <div className="flex items-center gap-2 text-gray-500 text-sm">
+                      <Activity className="h-5 w-5" />
+                      No recent activity
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

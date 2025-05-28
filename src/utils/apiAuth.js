@@ -2,6 +2,7 @@ import axios from "axios";
 
 const api = axios.create({
   baseURL: "https://api-focusflow-production.up.railway.app/api/v1/auth",
+  // baseURL: "http://localhost:5000/api/v1/auth",
   withCredentials: true,
 });
 
@@ -98,6 +99,16 @@ export const logoutUser = async () => {
 export const getAllUsers = async () => {
   try {
     const response = await api.get("/users");
+    return response.data.data;
+  } catch (error) {
+    throw error.response ? error.response.data : new Error("Network error");
+  }
+};
+
+// Get assigned users
+export const getAssignedUsers = async () => {
+  try {
+    const response = await api.get("/assigned-users");
     return response.data.data;
   } catch (error) {
     throw error.response ? error.response.data : new Error("Network error");

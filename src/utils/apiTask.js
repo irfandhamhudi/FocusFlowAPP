@@ -2,7 +2,8 @@ import axios from "axios";
 
 const api = axios.create({
   baseURL: "https://api-focusflow-production.up.railway.app/api/v1/tasks",
-  withCredentials: true, // Mengizinkan pengiriman cookies untuk autentikasi
+  // baseURL: "http://localhost:5000/api/v1/tasks", // Adjust as needed
+  withCredentials: true, // Allow sending cookies for authentication
 });
 
 export const fetchTasks = async () => {
@@ -37,14 +38,23 @@ export const fetchTaskById = async (id) => {
   }
 };
 
+const isValidEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
 export const createTask = async (taskData) => {
   try {
     const formData = new FormData();
-
-    // Validasi dan tambahkan field teks ke FormData
     for (const key in taskData) {
       if (key === "assignedTo" && Array.isArray(taskData[key])) {
-        formData.append(key, JSON.stringify(taskData[key]));
+        const validEmails = taskData[key].filter(
+          (email) => typeof email === "string" && isValidEmail(email)
+        );
+        if (validEmails.length === 0 && taskData[key].length > 0) {
+          throw new Error("Invalid email addresses in assignedTo");
+        }
+        formData.append(key, JSON.stringify(validEmails));
       } else if (key === "subtask" && Array.isArray(taskData[key])) {
         const validatedSubtasks = taskData[key]
           .map((sub) => ({
@@ -60,7 +70,6 @@ export const createTask = async (taskData) => {
         formData.append(key, taskData[key]);
       }
     }
-
     const response = await api.post("/", formData, {
       headers: {
         "Content-Type": "multipart/form-data",
@@ -81,11 +90,18 @@ export const updateTask = async (taskId, taskData) => {
   try {
     const formData = new FormData();
 
-    // Validasi dan tambahkan field teks ke FormData
+    // Validate and add fields to FormData
     for (const key in taskData) {
       if (key === "assignedTo" && Array.isArray(taskData[key])) {
-        console.log("AssignedTo sebelum dikirim:", taskData[key]); // Debugging
-        formData.append(key, JSON.stringify(taskData[key]));
+        // Ensure assignedTo is an array of email addresses
+        const validEmails = taskData[key].filter(
+          (email) => typeof email === "string" && email.trim() !== ""
+        );
+        if (validEmails.length === 0 && taskData[key].length > 0) {
+          throw new Error("Invalid email addresses in assignedTo");
+        }
+        console.log("AssignedTo before sending:", validEmails); // Debugging
+        formData.append(key, JSON.stringify(validEmails));
       } else if (key === "subtask" && Array.isArray(taskData[key])) {
         const validatedSubtasks = taskData[key]
           .map((sub) => ({
@@ -148,13 +164,80 @@ export const addComment = async (taskId, comment) => {
   }
 };
 
+export const editComment = async (taskId, commentId, comment) => {
+  try {
+    const response = await api.patch(`/${taskId}/comments/${commentId}`, {
+      comment,
+    });
+    return response.data;
+  } catch (error) {
+    console.error(
+      "Edit comment error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
+    throw new Error(error.response?.data?.message || "Gagal mengedit komentar");
+  }
+};
+
+export const deleteComment = async (taskId, commentId) => {
+  try {
+    const response = await api.delete(`/${taskId}/comments/${commentId}`);
+    return response.data;
+  } catch (error) {
+    console.error(
+      "Delete comment error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
+    throw new Error(
+      error.response?.data?.message || "Gagal menghapus komentar"
+    );
+  }
+};
+
+export const editCommentReply = async (taskId, commentId, replyId, comment) => {
+  try {
+    const response = await api.patch(
+      `/${taskId}/comments/${commentId}/replies/${replyId}`,
+      { comment }
+    );
+    return response.data;
+  } catch (error) {
+    console.error(
+      "Edit comment reply error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
+    throw new Error(
+      error.response?.data?.message || "Gagal mengedit balasan komentar"
+    );
+  }
+};
+
+export const deleteCommentReply = async (taskId, commentId, replyId) => {
+  try {
+    const response = await api.delete(
+      `/${taskId}/comments/${commentId}/replies/${replyId}`
+    );
+    return response.data;
+  } catch (error) {
+    console.error(
+      "Delete comment reply error:",
+      error.response?.status,
+      error.response?.data || error.message
+    );
+    throw new Error(
+      error.response?.data?.message || "Gagal menghapus balasan komentar"
+    );
+  }
+};
+
 export const addCommentReply = async (taskId, commentId, comment) => {
   try {
     const response = await api.post(
       `/${taskId}/comments/${commentId}/replies`,
-      {
-        comment,
-      }
+      { comment }
     );
     return response.data;
   } catch (error) {
@@ -209,24 +292,7 @@ export const downloadFile = async (taskId, fileName) => {
   }
 };
 
-// Fungsi untuk mengambil daftar undangan
-export const fetchInvitations = async () => {
-  try {
-    const response = await api.get("/invitations");
-    return response.data;
-  } catch (error) {
-    console.error(
-      "Fetch invitations error:",
-      error.response?.status,
-      error.response?.data || error.message
-    );
-    throw new Error(
-      error.response?.data?.message || "Gagal mengambil daftar undangan"
-    );
-  }
-};
-
-// Fungsi untuk menerima undangan
+// Accept an invitation
 export const acceptInvitation = async (taskId) => {
   try {
     const response = await api.post(`/invitations/accept/${taskId}`);
@@ -241,7 +307,7 @@ export const acceptInvitation = async (taskId) => {
   }
 };
 
-// Fungsi untuk menolak undangan
+// Decline an invitation
 export const declineInvitation = async (taskId) => {
   try {
     const response = await api.post(`/invitations/decline/${taskId}`);
@@ -256,19 +322,19 @@ export const declineInvitation = async (taskId) => {
   }
 };
 
-// Fungsi untuk mengambil daftar notifikasi
-export const fetchNotifications = async () => {
+// Join a task
+export const joinTask = async (token) => {
   try {
-    const response = await api.get("/notifications");
+    const response = await api.get(`/join/${token}`);
     return response.data;
   } catch (error) {
     console.error(
-      "Fetch notifications error:",
+      "Join task error:",
       error.response?.status,
       error.response?.data || error.message
     );
     throw new Error(
-      error.response?.data?.message || "Gagal mengambil daftar notifikasi"
+      error.response?.data?.message || "Gagal bergabung dengan tugas"
     );
   }
 };

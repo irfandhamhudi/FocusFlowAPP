@@ -7,7 +7,7 @@ import {
   declineInvitation,
 } from "../utils/apiTask";
 import { getInitialsAndColor } from "../utils/helpers";
-import { getAllUsers, getMe } from "../utils/apiAuth";
+import { getAssignedUsers, getMe } from "../utils/apiAuth";
 import {
   fetchUserNotifications,
   markAllNotificationsAsRead,
@@ -46,8 +46,7 @@ ChartJS.register(
 );
 
 const Dashboard = () => {
-  const [user, setUser] = useState(null); // State untuk menyimpan data pengguna
-  const [_tasks, setTasks] = useState([]);
+  const [user, setUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [activities, setActivities] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -65,61 +64,85 @@ const Dashboard = () => {
   });
 
   useEffect(() => {
+    loadUser();
     loadTasks();
     loadUsers();
     loadRecentActivity();
     loadNotifications();
-    loadUser(); // Panggil fungsi untuk mengambil data pengguna
 
-    // Polling every 30 seconds for new notifications
     const interval = setInterval(loadNotifications, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  // Fungsi untuk memuat data pengguna dari getMe
   const loadUser = async () => {
     try {
       const response = await getMe();
       if (response.success && response.data) {
-        setUser(response.data); // Simpan data pengguna
+        setUser(response.data);
       } else {
         setError("Failed to load user data");
       }
     } catch (err) {
-      setError("Failed to load user data: " + err.message);
+      setError(`Failed to load user data: ${err.message}`);
       console.error("Error fetching user:", err);
     }
   };
 
   const loadTasks = async () => {
     try {
-      const data = await fetchTasks();
-      setTasks(data);
-
+      const tasks = await fetchTasks();
       const stats = {
-        total: data.length,
-        pending: data.filter((task) => task.status === "pending").length,
-        inProgress: data.filter((task) => task.status === "inProgress").length,
-        completed: data.filter((task) => task.status === "completed").length,
-        low: data.filter((task) => task.priority === "low").length,
-        medium: data.filter((task) => task.priority === "medium").length,
-        high: data.filter((task) => task.priority === "high").length,
+        total: tasks.length,
+        pending: tasks.filter((task) => task.status === "pending").length,
+        inProgress: tasks.filter((task) => task.status === "inProgress").length,
+        completed: tasks.filter((task) => task.status === "completed").length,
+        low: tasks.filter((task) => task.priority === "low").length,
+        medium: tasks.filter((task) => task.priority === "medium").length,
+        high: tasks.filter((task) => task.priority === "high").length,
       };
       setTaskStats(stats);
       setError(null);
     } catch (err) {
-      setError(err.message);
+      setError(`Error fetching tasks: ${err.message}`);
       console.error("Error fetching tasks:", err);
     }
   };
 
   const loadUsers = async () => {
     try {
-      const data = await getAllUsers();
-      setUsers(Array.isArray(data) ? data : []);
+      const assignedUsers = await getAssignedUsers();
+      console.log("Assigned users:", assignedUsers);
+
+      let users = [];
+      if (Array.isArray(assignedUsers) && assignedUsers.length > 0) {
+        users = assignedUsers;
+      } else {
+        const tasks = await fetchTasks();
+        const assignedUserIds = new Set();
+        tasks.forEach((task) => {
+          if (task.assignedTo && Array.isArray(task.assignedTo)) {
+            task.assignedTo.forEach((user) => {
+              if (user?._id) {
+                assignedUserIds.add(user._id.toString());
+              }
+            });
+          }
+        });
+        users = tasks
+          .flatMap((task) => task.assignedTo || [])
+          .filter((user) => user && assignedUserIds.has(user._id.toString()))
+          .reduce((unique, user) => {
+            return unique.some((u) => u._id.toString() === user._id.toString())
+              ? unique
+              : [...unique, user];
+          }, []);
+      }
+
+      users.sort((a, b) => (a.username || "").localeCompare(b.username || ""));
+      setUsers(users);
       setError(null);
     } catch (err) {
-      setError("Failed to load users");
+      setError(`Error loading assigned users: ${err.message}`);
       console.error("Error fetching users:", err);
     }
   };
@@ -127,9 +150,9 @@ const Dashboard = () => {
   const loadRecentActivity = async () => {
     try {
       const data = await fetchRecentActivity(10);
-      setActivities(data);
+      setActivities(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError("Failed to load recent activity");
+      setError(`Error loading recent activity: ${err.message}`);
       console.error("Error fetching recent activity:", err);
     }
   };
@@ -137,14 +160,9 @@ const Dashboard = () => {
   const loadNotifications = async () => {
     try {
       const data = await fetchUserNotifications();
-      if (Array.isArray(data)) {
-        setNotifications(data);
-      } else {
-        setNotifications([]);
-        console.warn("Notifications data is not an array:", data);
-      }
+      setNotifications(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError("Failed to load notifications");
+      setError(`Error loading notifications: ${err.message}`);
       console.error("Error fetching notifications:", err);
     }
   };
@@ -152,63 +170,65 @@ const Dashboard = () => {
   const markAllAsRead = async () => {
     try {
       await markAllNotificationsAsRead();
-      setNotifications((prevNotifications) =>
-        prevNotifications.map((notif) => ({ ...notif, read: true }))
+      setNotifications((prev) =>
+        prev.map((notif) => ({ ...notif, read: true }))
       );
+      toast.success("All notifications marked as read");
     } catch (err) {
-      setError(`Failed to mark all notifications as read: ${err.message}`);
-      console.error("Error marking all notifications as read:", err);
+      setError(`Error marking notifications as read: ${err.message}`);
+      console.error("Error marking notifications as read:", err);
     }
   };
 
   const deleteNotif = async (notificationId) => {
     try {
       await deleteNotification(notificationId);
-      setNotifications((prevNotifications) =>
-        prevNotifications.filter((notif) => notif._id !== notificationId)
+      setNotifications((prev) =>
+        prev.filter((notif) => notif._id !== notificationId)
       );
+      toast.success("Notification deleted");
     } catch (err) {
-      setError(`Failed to delete notification: ${err.message}`);
+      setError(`Error deleting notification: ${err.message}`);
       console.error("Error deleting notification:", err);
     }
   };
 
   const handleAcceptInvitation = async (taskId, notificationId) => {
-    if (processingInvitations.has(taskId)) return; // Cegah aksi ganda
+    if (processingInvitations.has(taskId)) return;
 
-    setProcessingInvitations((prev) => new Set(prev).add(taskId)); // Tambahkan taskId ke Set
+    setProcessingInvitations((prev) => new Set(prev).add(taskId));
     try {
       await acceptInvitation(taskId, notificationId);
-      await loadNotifications(); // Perbarui notifikasi setelah menerima
-      toast.success("Invitation accepted successfully!");
+      await Promise.all([loadNotifications(), loadUsers(), loadTasks()]);
+      toast.success("Invitation accepted");
     } catch (err) {
-      setError(`Failed to accept invitation: ${err.message}`);
+      setError(`Error accepting invitation: ${err.message}`);
       console.error("Error accepting invitation:", err);
     } finally {
       setProcessingInvitations((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(taskId); // Hapus taskId dari Set setelah selesai
+        newSet.delete(taskId);
         return newSet;
       });
     }
   };
 
   const handleDeclineInvitation = async (taskId, notificationId) => {
-    if (processingInvitations.has(taskId)) return; // Cegah aksi ganda
+    if (processingInvitations.has(taskId)) return;
 
-    if (window.confirm("Are you sure you want to decline this invitation?")) {
-      setProcessingInvitations((prev) => new Set(prev).add(taskId)); // Tambahkan taskId ke Set
+    if (window.confirm("Decline this invitation?")) {
+      setProcessingInvitations((prev) => new Set(prev).add(taskId));
       try {
         await declineInvitation(taskId, notificationId);
-        await loadNotifications(); // Perbarui notifikasi setelah menolak
-        toast.success("Invitation declined successfully!");
+        await loadNotifications();
+        toast.success("Invitation declined");
       } catch (err) {
-        setError(`Failed to decline invitation: ${err.message}`);
+        setError(`Error declining invitation: ${err.message}`);
         console.error("Error declining invitation:", err);
       } finally {
         setProcessingInvitations((prev) => {
           const newSet = new Set(prev);
-          newSet.delete(taskId); // Hapus taskId dari Set setelah selesai
+          newSet.delete(taskId);
           return newSet;
         });
       }
@@ -216,87 +236,19 @@ const Dashboard = () => {
   };
 
   const getFileType = (fileName) => {
-    if (fileName.toLowerCase().endsWith(".pdf")) return "PDF";
-    if (
-      fileName.toLowerCase().endsWith(".jpg") ||
-      fileName.toLowerCase().endsWith(".jpeg") ||
-      fileName.toLowerCase().endsWith(".png")
-    )
-      return "Image";
+    const ext = fileName.toLowerCase();
+    if (ext.endsWith(".pdf")) return "PDF";
+    if ([".jpg", ".jpeg", ".png"].some((e) => ext.endsWith(e))) return "Image";
     return "Document";
   };
-
-  // const formatAction = (action) => {
-  //   // Menangani "uploaded file(s)"
-  //   if (action.includes("uploaded file(s):")) {
-  //     const [userPart, filePart] = action.split(" uploaded file(s): ");
-  //     return (
-  //       <>
-  //         {userPart} uploaded file(s){" "}
-  //         <span className="font-bold">{filePart}</span>
-  //       </>
-  //     );
-  //   }
-  //   // Menangani "created task"
-  //   if (action.includes("created task")) {
-  //     const prefix = action.split("created task ")[0];
-  //     const titleMatch = action.match(/created task ([^ ]+)/);
-  //     if (titleMatch) {
-  //       const titlePart = titleMatch[1];
-  //       return (
-  //         <>
-  //           {prefix}created task <span className="font-bold">{titlePart}</span>
-  //         </>
-  //       );
-  //     }
-  //   }
-  //   // Menangani "assigned task with title"
-  //   if (action.includes("assigned task with title")) {
-  //     const prefix = action.split("assigned task with title ")[0];
-  //     const titleMatch = action.match(/assigned task with title "([^"]+)"/);
-  //     if (titleMatch) {
-  //       const titlePart = titleMatch[1];
-  //       return (
-  //         <>
-  //           {prefix}assigned task with title{" "}
-  //           <span className="font-bold">{titlePart}</span>
-  //         </>
-  //       );
-  //     }
-  //   }
-  //   // Menangani "accepted invitation to join"
-  //   if (action.includes("accepted invitation to join")) {
-  //     const prefix = action.split(" accepted invitation to join ")[0];
-  //     const titlePart = action.split(" accepted invitation to join ")[1];
-  //     return (
-  //       <>
-  //         {prefix} accepted invitation to join{" "}
-  //         <span className="font-bold">{titlePart}</span>
-  //       </>
-  //     );
-  //   }
-  //   // Menangani "declined invitation to join"
-  //   if (action.includes("declined invitation to join")) {
-  //     const prefix = action.split(" declined invitation to join ")[0];
-  //     const titlePart = action.split(" declined invitation to join ")[1];
-  //     return (
-  //       <>
-  //         {prefix} declined invitation to join{" "}
-  //         <span className="font-bold">{titlePart}</span>
-  //       </>
-  //     );
-  //   }
-  //   // Menangani komentar
-
-  //   return action;
-  // };
 
   const handleDownload = async (taskId, fileName) => {
     try {
       await downloadFile(taskId, fileName);
+      toast.success("File downloaded");
     } catch (err) {
       setError(`Error downloading file: ${err.message}`);
-      console.error("Error downloading file:", err.message);
+      console.error("Error downloading file:", err);
     }
   };
 
@@ -304,10 +256,10 @@ const Dashboard = () => {
     labels: ["Pending", "In Progress", "Completed"],
     datasets: [
       {
-        label: "Task Status Distribution",
+        label: "Task Status",
         data: [taskStats.pending, taskStats.inProgress, taskStats.completed],
         backgroundColor: ["#f59e0b", "#3b82f6", "#22c55e"],
-        borderColor: ["#ffffff", "#ffffff", "#ffffff"],
+        borderColor: ["#fff", "#fff", "#fff"],
         borderWidth: 2,
       },
     ],
@@ -317,10 +269,10 @@ const Dashboard = () => {
     labels: ["High", "Medium", "Low"],
     datasets: [
       {
-        label: "Task Priority Distribution",
+        label: "Task Priority",
         data: [taskStats.high, taskStats.medium, taskStats.low],
         backgroundColor: ["#ef4444", "#f59e0b", "#e5e7eb"],
-        borderColor: ["#dc2626", "#f59e0b", "#e5e7eb"],
+        borderColor: ["#dc2626", "#d97706", "#d1d5db"],
         borderWidth: 1,
       },
     ],
@@ -332,12 +284,7 @@ const Dashboard = () => {
     plugins: {
       legend: {
         position: "top",
-        labels: {
-          color: "#374151",
-          font: {
-            weight: "bold",
-          },
-        },
+        labels: { color: "#374151", font: { weight: "bold" } },
       },
       tooltip: {
         callbacks: {
@@ -357,37 +304,75 @@ const Dashboard = () => {
     responsive: true,
     maintainAspectRatio: false,
     scales: {
-      y: {
-        beginAtZero: true,
-        ticks: {
-          precision: 0,
-        },
-      },
+      y: { beginAtZero: true, ticks: { precision: 0 } },
     },
     plugins: {
-      legend: {
-        display: false,
-      },
+      legend: { display: false },
       tooltip: {
         callbacks: {
-          label: (context) => {
-            const label = context.dataset.label || "";
-            const value = context.raw || 0;
-            return `${label}: ${value}`;
-          },
+          label: (context) => `${context.dataset.label}: ${context.raw}`,
         },
       },
     },
   };
 
-  const unreadNotificationsCount = notifications.filter(
-    (notif) => !notif.read
-  ).length;
+  const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+
+  const formatAction = (action) => {
+    const parseMentions = (text) =>
+      text.split(/(@[\w.@]+)/g).map((part, i) =>
+        part.startsWith("@") ? (
+          <span key={i} className="text-blue-500 hover:underline">
+            {part}{" "}
+          </span>
+        ) : (
+          <span key={i}>{part} </span>
+        )
+      );
+
+    if (action.includes("uploaded file(s):")) {
+      const [userPart, filePart] = action.split(" uploaded file(s): ");
+      return (
+        <>
+          {parseMentions(userPart)} uploaded file(s):{" "}
+          <span className="font-semibold">{filePart}</span>
+        </>
+      );
+    }
+    if (action.includes("created task")) {
+      const [prefix, title] = action.split("created task ");
+      return (
+        <>
+          {parseMentions(prefix)} created task{" "}
+          <span className="font-semibold">{title}</span>
+        </>
+      );
+    }
+    if (action.includes("added comment :")) {
+      const [userPart, comment] = action.split(" added comment : ");
+      return (
+        <>
+          {parseMentions(userPart)} added comment:{" "}
+          <span className="font-semibold">{parseMentions(comment)}</span>
+        </>
+      );
+    }
+    if (action.includes("replied to comment")) {
+      const [prefix, reply] = action.split(" : ");
+      return (
+        <>
+          {parseMentions(prefix)}:{" "}
+          <span className="font-semibold">{parseMentions(reply)}</span>
+        </>
+      );
+    }
+    return parseMentions(action);
+  };
 
   return (
-    <div className="min-h-screen text-gray-800 lg:p-6 p-3 ">
+    <div className="min-h-screen text-gray-800 lg:p-6 p-3">
       {/* Header */}
-      <div className="mb-8 flex justify-between lg:items-center">
+      <div className="mb-8 flex lg:flex-row justify-between lg:items-center gap-4">
         <div>
           <h1 className="text-[22px] lg:text-3xl font-bold text-gray-900 flex items-center gap-2">
             Dashboard Overview
@@ -395,8 +380,8 @@ const Dashboard = () => {
           <p className="lg:text-base text-[18px] text-gray-600">
             Welcome back{" "}
             <span className="font-bold text-font1">
-              {user ? user.username : "Username"}{" "}
-            </span>
+              {user ? user.username : "Username"}
+            </span>{" "}
             Here's what's happening with your tasks.
           </p>
         </div>
@@ -435,9 +420,8 @@ const Dashboard = () => {
                           ? notif.task._id.toString()
                           : notif.task?.toString();
                       const taskTitle =
-                        notif.task?.title || "No title available"; // Ambil judul tugas dari notif.task
+                        notif.task?.title || "No title available";
 
-                      // Pisahkan pesan untuk menempatkan task.title di dalam tag tebal
                       let formattedMessage =
                         notif.message || "No message available";
                       if (isInvitation && notif.task?.title) {
@@ -527,7 +511,7 @@ const Dashboard = () => {
                                     onClick={() =>
                                       handleDeclineInvitation(taskId, notif._id)
                                     }
-                                    className={`bg-red-100 hover:bg-red-500 hover:text-white text-red-500 text-xs px-2 py-1 rounded  ${
+                                    className={`bg-red-100 hover:bg-red-500 hover:text-white text-red-500 text-xs px-2 py-1 rounded ${
                                       processingInvitations.has(taskId)
                                         ? "opacity-50 cursor-not-allowed"
                                         : ""
@@ -540,7 +524,7 @@ const Dashboard = () => {
                                     onClick={() =>
                                       handleAcceptInvitation(taskId, notif._id)
                                     }
-                                    className={`bg-green-100 hover:bg-green-500 hover:text-white text-green-500 text-xs px-2 py-1 rounded  ${
+                                    className={`bg-green-100 hover:bg-green-500 hover:text-white text-green-500 text-xs px-2 py-1 rounded ${
                                       processingInvitations.has(taskId)
                                         ? "opacity-50 cursor-not-allowed"
                                         : ""
@@ -585,8 +569,8 @@ const Dashboard = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="border border-borderPrimary p-6 rounded-md bg-white flex items-center lg:items-start gap-4">
-          <div className="bg-black p-3 rounded-full">
+        <div className="bg-white border border-gray-200 p-6 rounded-lg flex items-center gap-4">
+          <div className="bg-gray-900 p-3 rounded-full">
             <ListChecks className="text-white w-5 h-5" />
           </div>
           <div>
@@ -594,11 +578,10 @@ const Dashboard = () => {
             <p className="text-3xl font-bold text-gray-900">
               {taskStats.total}
             </p>
-            <p className="text-sm text-gray-500">All tasks in the system</p>
+            <p className="text-sm text-gray-500">All tasks</p>
           </div>
         </div>
-
-        <div className="border border-borderPrimary p-6 rounded-md bg-white flex items-center lg:items-start gap-4">
+        <div className="bg-white border border-gray-200 p-6 rounded-lg flex items-center gap-4">
           <div className="bg-amber-100 p-3 rounded-full">
             <Clock className="text-amber-500 w-5 h-5" />
           </div>
@@ -607,11 +590,10 @@ const Dashboard = () => {
             <p className="text-3xl font-bold text-gray-900">
               {taskStats.pending}
             </p>
-            <p className="text-sm text-gray-500">Waiting to start</p>
+            <p className="text-sm text-gray-500">Awaiting start</p>
           </div>
         </div>
-
-        <div className="border border-borderPrimary p-6 rounded-md bg-white flex items-center lg:items-start gap-4">
+        <div className="bg-white border border-gray-200 p-6 rounded-lg flex items-center gap-4">
           <div className="bg-blue-100 p-3 rounded-full">
             <Loader className="text-blue-500 w-5 h-5" />
           </div>
@@ -620,11 +602,10 @@ const Dashboard = () => {
             <p className="text-3xl font-bold text-gray-900">
               {taskStats.inProgress}
             </p>
-            <p className="text-sm text-gray-500">Currently working</p>
+            <p className="text-sm text-gray-500">Active tasks</p>
           </div>
         </div>
-
-        <div className="border border-borderPrimary p-6 rounded-md bg-white flex items-center lg:items-start gap-4">
+        <div className="bg-white border border-gray-200 p-6 rounded-lg flex items-center gap-4">
           <div className="bg-green-100 p-3 rounded-full">
             <CheckCircle className="text-green-500 w-5 h-5" />
           </div>
@@ -633,7 +614,7 @@ const Dashboard = () => {
             <p className="text-3xl font-bold text-gray-900">
               {taskStats.completed}
             </p>
-            <p className="text-sm text-gray-500">Tasks finished</p>
+            <p className="text-sm text-gray-500">Finished tasks</p>
           </div>
         </div>
       </div>
@@ -641,17 +622,20 @@ const Dashboard = () => {
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div>
-          <h1 className="text-lg font-semibold mb-4">Priority Stats</h1>
-          <div className="border border-borderPrimary p-6 rounded-md bg-white">
+          <h2 className="text-lg font-semibold mb-4 text-gray-800">
+            Priority Distribution
+          </h2>
+          <div className="bg-white border border-gray-200 p-6 rounded-lg">
             <div className="h-64">
               <Bar data={priorityChartData} options={priorityChartOptions} />
             </div>
           </div>
         </div>
-
         <div>
-          <h1 className="text-lg font-semibold mb-4">Status Chart</h1>
-          <div className="border border-borderPrimary p-6 rounded-md bg-white">
+          <h2 className="text-lg font-semibold mb-4 text-gray-800">
+            Status Distribution
+          </h2>
+          <div className="bg-white border border-gray-200 p-6 rounded-lg">
             <div className="h-64">
               <Pie data={statusChartData} options={chartOptions} />
             </div>
@@ -661,9 +645,11 @@ const Dashboard = () => {
 
       {/* Recent Activity and Users Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 ">
-          <h1 className="text-lg font-semibold mb-4">Recent Activity</h1>
-          <div className="border border-borderPrimary p-5 rounded-md bg-white">
+        <div className="lg:col-span-2">
+          <h2 className="text-lg font-semibold mb-4 text-gray-800">
+            Recent Activity
+          </h2>
+          <div className="bg-white border border-gray-200 p-5 rounded-lg">
             <div className="space-y-4 h-[350px] overflow-y-auto pr-2">
               {activities.length > 0 ? (
                 activities.map((activity, index) => (
@@ -671,7 +657,7 @@ const Dashboard = () => {
                     {activity.files && activity.files.length > 0 ? (
                       <div className="flex items-start gap-3 w-full">
                         <div
-                          className="w-10 h-10 object-cover rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 mt-1"
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 mt-1"
                           style={{
                             backgroundColor: getInitialsAndColor(activity.user)
                               .color,
@@ -684,27 +670,18 @@ const Dashboard = () => {
                               className="w-full h-full rounded-full object-cover"
                             />
                           ) : (
-                            <div
-                              className="w-10 h-10 object-cover rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0"
-                              style={{
-                                backgroundColor: getInitialsAndColor(
-                                  activity.user
-                                ).color,
-                              }}
-                            >
-                              {getInitialsAndColor(activity.user).initials}
-                            </div>
+                            getInitialsAndColor(activity.user).initials || "U"
                           )}
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center gap-1 text-sm">
-                            <p className="text-font1">{activity.action}</p>
-                          </div>
-                          <div className="mt-2 w-[350px]">
+                          <p className="text-sm text-gray-800">
+                            {formatAction(activity.action)}
+                          </p>
+                          <div className="mt-2 space-y-2">
                             {activity.files.map((file, fileIndex) => (
                               <div
                                 key={fileIndex}
-                                className="flex items-center bg-gray-100 p-2 rounded-md mb-2"
+                                className="flex items-center bg-gray-100 p-2 rounded-md"
                               >
                                 <div className="mr-2">
                                   {getFileType(file.name) === "PDF" ? (
@@ -734,50 +711,52 @@ const Dashboard = () => {
                                   )}
                                 </div>
                                 <div className="flex-1">
-                                  <p className="text-sm font-medium">
+                                  <p className="text-sm font-medium text-gray-800">
                                     {file.name}
                                   </p>
                                   <p className="text-xs text-gray-500">
-                                    {getFileType(file.name)} ·{" "}
-                                    {file.size || "N/A"}mb
+                                    {getFileType(file.name)} •{" "}
+                                    {file.size
+                                      ? file.size < 1
+                                        ? `${(file.size * 1024).toFixed(2)} KB`
+                                        : `${file.size.toFixed(2)} MB`
+                                      : "N/A"}
                                   </p>
                                 </div>
                                 <button
                                   onClick={() =>
                                     handleDownload(activity.taskId, file.name)
                                   }
-                                  className="text-blue-500 hover:text-blue-700 ml-2"
+                                  className="text-blue-600 hover:text-blue-800"
+                                  aria-label="Download file"
                                 >
                                   <CloudDownload className="w-4 h-4" />
                                 </button>
                               </div>
                             ))}
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-xs text-gray-500 mt-1">
                             {activity.createdAt
-                              ? `${new Date(
-                                  activity.createdAt
-                                ).toLocaleDateString("in-ID", {
-                                  day: "2-digit",
-                                  month: "long",
-                                  year: "numeric",
-                                  timeZone: "Asia/Jakarta",
-                                })} - ${new Date(
-                                  activity.createdAt
-                                ).toLocaleTimeString("in-ID", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: true,
-                                  timeZone: "Asia/Jakarta",
-                                })}`
-                              : "Tanggal tidak tersedia"}
+                              ? new Date(activity.createdAt).toLocaleString(
+                                  "id-ID",
+                                  {
+                                    day: "2-digit",
+                                    month: "long",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: true,
+                                    timeZone: "Asia/Jakarta",
+                                  }
+                                )
+                              : "Date unavailable"}
                           </p>
                         </div>
                       </div>
                     ) : (
                       <div className="flex items-start gap-3 w-full">
                         <div
-                          className="w-10 h-10 text-sm rounded-full flex items-center justify-center text-white font-semibold mt-1 flex-shrink-0"
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 mt-1"
                           style={{
                             backgroundColor: getInitialsAndColor(activity.user)
                               .color,
@@ -786,46 +765,34 @@ const Dashboard = () => {
                           {activity.avatar ? (
                             <img
                               src={activity.avatar}
-                              alt="avatar"
-                              className="w-10 h-10 rounded-full flex-shrink-0 object-cover"
+                              alt="User Avatar"
+                              className="w-full h-full rounded-full object-cover"
                             />
                           ) : (
-                            <div
-                              className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0"
-                              style={{
-                                backgroundColor: getInitialsAndColor(
-                                  activity.user
-                                ).color,
-                              }}
-                            >
-                              {getInitialsAndColor(activity.user).initials}
-                            </div>
+                            getInitialsAndColor(activity.user).initials || "U"
                           )}
                         </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1 text-sm">
-                            <p className="text-font1">
-                              {activity.action || "No action specified"}
+                        <div className="flex-1 overflow-auto">
+                          <div className="border border-gray-200 bg-gray-50 p-2 rounded-md">
+                            <p className="text-sm break-words text-gray-600">
+                              {formatAction(activity.action)}
                             </p>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-xs text-gray-500 mt-1">
                             {activity.createdAt
-                              ? `${new Date(
-                                  activity.createdAt
-                                ).toLocaleDateString("in-ID", {
-                                  day: "2-digit",
-                                  month: "long",
-                                  year: "numeric",
-                                  timeZone: "Asia/Jakarta",
-                                })} - ${new Date(
-                                  activity.createdAt
-                                ).toLocaleTimeString("in-ID", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: true,
-                                  timeZone: "Asia/Jakarta",
-                                })}`
-                              : "Tanggal tidak tersedia"}
+                              ? new Date(activity.createdAt).toLocaleString(
+                                  "id-ID",
+                                  {
+                                    day: "2-digit",
+                                    month: "long",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: true,
+                                    timeZone: "Asia/Jakarta",
+                                  }
+                                )
+                              : "Date unavailable"}
                           </p>
                         </div>
                       </div>
@@ -842,94 +809,93 @@ const Dashboard = () => {
         </div>
 
         <div>
-          <h1 className="text-lg font-semibold mb-4">User ({users.length})</h1>
-          <div className="border border-borderPrimary rounded-md bg-white">
+          <h2 className="text-lg font-semibold mb-4 text-gray-800">
+            Assigned Users ({users.length})
+          </h2>
+          <div className="bg-white border border-gray-200 p-4 rounded-lg">
             <div className="max-h-[220px] overflow-y-auto">
               {users.length > 0 ? (
-                <>
-                  {users.slice(0, 4).map((user) => (
-                    <div
-                      key={user._id}
-                      className="flex items-center gap-3 p-4 hover:bg-gray-50 border-b border-gray-100"
+                <ul className="space-y-2">
+                  {users.slice(0, 5).map((user) => (
+                    <li
+                      key={user._id.toString()}
+                      className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded-md"
                     >
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full flex-shrink-0">
                         {user.avatar ? (
                           <img
                             src={user.avatar}
                             alt={user.username || "User"}
-                            className="w-10 h-10 rounded-full flex-shrink-0 object-cover"
+                            className="w-full h-full rounded-full object-cover"
                           />
                         ) : (
                           <div
-                            className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs"
                             style={{
                               backgroundColor: getInitialsAndColor(
-                                user.username || "User"
+                                user.username
                               ).color,
                             }}
                           >
-                            {
-                              getInitialsAndColor(user.username || "User")
-                                .initials
-                            }
+                            {getInitialsAndColor(user.username).initials || "U"}
                           </div>
                         )}
                       </div>
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">
-                          {user.username || "Unknown User"}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate">
+                          {user.username || "Unknown"}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">
-                          {user.email || "No email"}
+                        <p className="text-xs text-gray-600 truncate">
+                          {user.email || "-"}
                         </p>
                       </div>
-                    </div>
+                    </li>
                   ))}
-                  {users.length > 4 && (
-                    <div className="max-h-[200px] overflow-y-auto">
-                      {users.slice(4).map((user) => (
-                        <div
-                          key={user._id}
-                          className="flex items-center gap-3 p-4 hover:bg-gray-50 border-b border-gray-100"
+                  {users.length > 5 && (
+                    <ul className="space-y-2">
+                      {users.slice(5).map((user) => (
+                        <li
+                          key={user._id.toString()}
+                          className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded-md"
                         >
-                          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
+                          <div className="w-8 h-8 rounded-full flex-shrink-0">
                             {user.avatar ? (
                               <img
                                 src={user.avatar}
                                 alt={user.username || "User"}
-                                className="w-10 h-10 rounded-full flex-shrink-0 object-cover"
+                                className="w-full h-full rounded-full object-cover"
                               />
                             ) : (
                               <div
-                                className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0"
+                                className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs"
                                 style={{
                                   backgroundColor: getInitialsAndColor(
-                                    user.username || "User"
+                                    user.username
                                   ).color,
                                 }}
                               >
-                                {
-                                  getInitialsAndColor(user.username || "User")
-                                    .initials
-                                }
+                                {getInitialsAndColor(user.username).initials ||
+                                  "U"}
                               </div>
                             )}
                           </div>
-                          <div className="min-w-0">
-                            <p className="font-medium truncate">
-                              {user.username || "Unknown User"}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-800 truncate">
+                              {user.username || "Unknown"}
                             </p>
-                            <p className="text-xs text-gray-500 truncate">
-                              {user.email || "No email"}
+                            <p className="text-xs text-gray-600 truncate">
+                              {user.email || "-"}
                             </p>
                           </div>
-                        </div>
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   )}
-                </>
+                </ul>
               ) : (
-                <p className="text-gray-500 text-center py-4">No users found</p>
+                <p className="text-gray-500 text-center py-4">
+                  No assigned users
+                </p>
               )}
             </div>
           </div>

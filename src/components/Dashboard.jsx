@@ -821,7 +821,7 @@ const Dashboard = () => {
                       key={user._id.toString()}
                       className="flex items-center gap-3 p-2 hover:bg-gray-100 rounded-md"
                     >
-                      <div className="w-8 h-8 rounded-full flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full flex-shrink-0">
                         {user.avatar ? (
                           <img
                             src={user.avatar}
@@ -830,7 +830,7 @@ const Dashboard = () => {
                           />
                         ) : (
                           <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs"
+                            className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-xs"
                             style={{
                               backgroundColor: getInitialsAndColor(
                                 user.username

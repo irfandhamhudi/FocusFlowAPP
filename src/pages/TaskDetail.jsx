@@ -231,8 +231,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       return;
     }
     try {
-      // If backend expects @email, uncomment and use mapMentionsToEmail (see below)
-      // const mappedComment = mapMentionsToEmail(comment.trim());
       await addComment(taskId, comment.trim());
       setComment("");
       toast.success("Comment added.");
@@ -252,8 +250,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       return;
     }
     try {
-      // If backend expects @email, uncomment and use mapMentionsToEmail
-      // const mappedReply = mapMentionsToEmail(replyText);
       await addCommentReply(taskId, commentId, replyText);
       setReplyInputs((prev) => ({ ...prev, [inputId]: "" }));
       toast.success("Reply added.");
@@ -273,17 +269,16 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     }
   };
 
-  // Handle mention input for comments
   const handleMentionInput = (value) => {
     setComment(value);
-    const lastWord = value.trim().split(/\s+/).pop(); // Split on whitespace
+    const lastWord = value.trim().split(/\s+/).pop();
     if (lastWord.startsWith("@")) {
       const searchTerm = lastWord.slice(1).toLowerCase();
       const assignedUsers = task?.assignedTo
         ?.filter((user) => user?.username?.toLowerCase().includes(searchTerm))
         .map((user) => ({
           _id: user._id,
-          username: user.username, // Full username with spaces
+          username: user.username,
           email: user.email,
         }));
       const ownerUser = task?.owner?.username
@@ -297,7 +292,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
             },
           ]
         : [];
-      // Deduplicate by _id
       const uniqueUsers = [
         ...new Map(
           [...assignedUsers, ...ownerUser].map((user) => [user._id, user])
@@ -313,7 +307,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     }
   };
 
-  // Handle mention input for replies
   const handleReplyInputChange = (id, value) => {
     setReplyInputs((prev) => ({ ...prev, [id]: value }));
     const lastWord = value.split(" ").pop();
@@ -354,7 +347,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     }
   };
 
-  // Select a mention and insert @username
   const handleSelectMention = (user) => {
     const textareaValue =
       currentTextarea === "comment"
@@ -372,20 +364,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     setSuggestions([]);
     setCurrentTextarea(null);
   };
-
-  // Optional: Map @username to @email if backend requires it
-  /*
-  const mapMentionsToEmail = (text) => {
-    const userMap = {};
-    task?.assignedTo?.forEach((user) => {
-      if (user.username && user.email) userMap[user.username] = user.email;
-    });
-    if (task?.owner?.username && task?.owner?.email) {
-      userMap[task.owner.username] = task.owner.email;
-    }
-    return text.replace(/@([\w]+)/g, (match, username) => userMap[username] ? `@${userMap[username]}` : match);
-  };
-  */
 
   const statusOptions = [
     { value: "pending", label: "Pending" },
@@ -447,13 +425,12 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     return `${diffInYears} year${diffInYears !== 1 ? "s" : ""} ago`;
   };
 
-  const formatAction = (action) => {
-    // Map email to username for mentions
+  const parseTextWithMentions = (text) => {
     const userMap = {};
     task?.assignedTo?.forEach((user) => {
       if (user.email && user.username) {
-        userMap[user.email.toLowerCase()] = user.username; // Map email to full username
-        userMap[user.username.toLowerCase()] = user.username; // Map username to itself for consistency
+        userMap[user.email.toLowerCase()] = user.username;
+        userMap[user.username.toLowerCase()] = user.username;
       }
     });
     if (task?.owner?.email && task?.owner?.username) {
@@ -461,30 +438,45 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       userMap[task.owner.username.toLowerCase()] = task.owner.username;
     }
 
-    const parseTextWithMentions = (text) => {
-      // Match @ followed by any chars except @ or comma, allowing spaces
-      const parts = text.split(/(@[^@,\s][^@,]+)/g);
-      return parts.map((part, index) => {
-        if (part.startsWith("@")) {
-          const key = part.slice(1).toLowerCase();
-          // Use username from userMap or fallback to original (minus @)
-          const username = userMap[key] || part.slice(1);
-          return (
-            <span key={index} className="text-blue-500 hover:underline">
-              @{username}{" "}
-            </span>
-          );
-        }
-        return <span key={index}>{part} </span>;
-      });
-    };
+    // Updated regex to allow spaces in usernames, stop at next @ or end
+    const parts = text.split(/(@[^@]+)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith("@")) {
+        const key = part.slice(1).toLowerCase();
+        const username = userMap[key] || part.slice(1);
+        return (
+          <span key={index} className="text-blue-500 hover:underline">
+            @{username}
+          </span>
+        );
+      }
+      return (
+        <span key={index} className="text-gray-800">
+          {part}
+        </span>
+      );
+    });
+  };
+
+  const formatAction = (action) => {
+    const userMap = {};
+    task?.assignedTo?.forEach((user) => {
+      if (user.email && user.username) {
+        userMap[user.email.toLowerCase()] = user.username;
+        userMap[user.username.toLowerCase()] = user.username;
+      }
+    });
+    if (task?.owner?.email && task?.owner?.username) {
+      userMap[task.owner.email.toLowerCase()] = task.owner.username;
+      userMap[task.owner.username.toLowerCase()] = task.owner.username;
+    }
 
     if (action.includes("uploaded file(s):")) {
       const [userPart, filePart] = action.split(" uploaded file(s): ");
       return (
         <>
           {parseTextWithMentions(userPart)} uploaded file(s):{" "}
-          <span className="font-semibold">{filePart}</span>
+          <span className="font-semibold text-gray-800">{filePart}</span>
         </>
       );
     }
@@ -493,7 +485,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       return (
         <>
           {parseTextWithMentions(prefix)} created task{" "}
-          <span className="font-semibold">{title}</span>
+          <span className="font-semibold text-gray-800">{title}</span>
         </>
       );
     }
@@ -508,8 +500,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
         </>
       );
     }
-    if (action.includes("replied to comment")) {
-      const [prefix, replyPart] = action.split(" : ");
+    if (action.includes("replied to comment :")) {
+      const [prefix, replyPart] = action.split(" replied to comment : ");
       return (
         <>
           {parseTextWithMentions(prefix)}:{" "}
@@ -1115,22 +1107,26 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                 ).initials
                               )}
                             </div>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <p className="font-semibold">
-                                  {c.user?.username || "Unknown"}
-                                </p>
-                                <p className="text-gray-500 text-xs">
-                                  ({c.user?.email})
-                                </p>
-                                <p className="text-gray-500 text-xs">
-                                  {formatRelativeTime(c.createdAt)}
-                                </p>
+                            <div className="flex-1 overflow-hidden">
+                              <div className="flex justify-between gap-1 flex-col lg:flex-row lg:items-center lg:gap-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold">
+                                    {c.user?.username || "Unknown"}
+                                  </p>
+                                  <p className="text-gray-500 text-xs">
+                                    ({c.user?.email})
+                                  </p>
+                                </div>
+                                <div className="flex items-center ">
+                                  <p className="text-gray-500 text-xs">
+                                    {formatRelativeTime(c.createdAt)}
+                                  </p>
+                                </div>
                               </div>
-                              <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded-md">
-                                <p className="text-sm text-gray-600">
-                                  {formatAction(c.comment)}
-                                </p>
+                              <div className="mt-2 break-words lg:w-full w-[280px] border border-gray-200 bg-gray-50 p-2 rounded-md">
+                                <div className="text-sm">
+                                  {parseTextWithMentions(c.comment)}
+                                </div>
                                 <button
                                   onClick={() =>
                                     setReplyInputs((prev) => ({
@@ -1207,7 +1203,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                 </form>
                               )}
                               {c.replies?.length > 0 && (
-                                <div className="ml-4 mt-2 space-y-4">
+                                <div className=" mt-2 space-y-4">
                                   {c.replies.map((reply) => (
                                     <div
                                       key={reply._id}
@@ -1237,24 +1233,30 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                           )}
                                         </div>
                                         <div className="flex-1">
-                                          <div className="flex items-center gap-2">
-                                            <p className="font-semibold">
-                                              {reply.user?.username ||
-                                                "Unknown"}
-                                            </p>
-                                            <p className="text-gray-500 text-xs">
-                                              ({reply.user?.email})
-                                            </p>
-                                            <p className="text-gray-500 text-xs">
-                                              {formatRelativeTime(
-                                                reply.createdAt
-                                              )}
-                                            </p>
+                                          <div className="flex justify-between gap-1 flex-col lg:flex-row lg:items-center lg:gap-2">
+                                            <div className="flex items-center gap-2">
+                                              <p className="font-semibold">
+                                                {reply.user?.username ||
+                                                  "Unknown"}
+                                              </p>
+                                              <p className="text-gray-500 text-xs">
+                                                ({reply.user?.email})
+                                              </p>
+                                            </div>
+                                            <div className="flex items-center ">
+                                              <p className="text-gray-500 text-xs">
+                                                {formatRelativeTime(
+                                                  reply.createdAt
+                                                )}
+                                              </p>
+                                            </div>
                                           </div>
-                                          <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded-md">
-                                            <p className="text-sm text-gray-600">
-                                              {formatAction(reply.comment)}
-                                            </p>
+                                          <div className="mt-2  break-words lg:w-[380px]  w-[240px] border border-gray-200 bg-gray-50 p-2 rounded-md">
+                                            <div className="text-sm">
+                                              {parseTextWithMentions(
+                                                reply.comment
+                                              )}
+                                            </div>
                                             <button
                                               onClick={() =>
                                                 setReplyInputs((prev) => ({

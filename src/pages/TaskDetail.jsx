@@ -8,7 +8,7 @@ import {
   downloadFile,
 } from "../utils/apiTask";
 import { formatDistanceToNow } from "date-fns";
-import { id } from "date-fns/locale";
+// import { id } from "date-fns/locale";
 import { toast } from "react-hot-toast";
 import CreatableSelect from "react-select/creatable";
 import Select from "react-select";
@@ -408,7 +408,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     if (!date) return "-";
     return formatDistanceToNow(new Date(date), {
       addSuffix: true,
-      locale: id, // Untuk format dalam bahasa Indonesia
+      // locale: id, // Untuk format dalam bahasa Indonesia
     });
   };
 

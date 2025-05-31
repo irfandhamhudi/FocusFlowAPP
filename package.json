@@ -17,6 +17,7 @@
     "@tailwindcss/typography": "^0.5.16",
     "axios": "^1.9.0",
     "chart.js": "^4.4.9",
+    "date-fns": "^4.1.0",
     "i18next": "^25.2.1",
     "lucide-react": "^0.511.0",
     "ollama": "^0.5.15",

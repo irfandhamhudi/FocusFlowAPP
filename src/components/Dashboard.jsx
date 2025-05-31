@@ -319,16 +319,33 @@ const Dashboard = () => {
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
 
   const formatAction = (action) => {
-    const parseMentions = (text) =>
-      text.split(/(@[\w.@]+)/g).map((part, i) =>
-        part.startsWith("@") ? (
-          <span key={i} className="text-blue-500 hover:underline">
-            {part}{" "}
+    const userMap = {};
+    users.forEach((user) => {
+      if (user.email && user.username) {
+        userMap[user.email.toLowerCase()] = user.username;
+        userMap[user.username.toLowerCase()] = user.username;
+      }
+    });
+
+    const parseMentions = (text) => {
+      const parts = text.split(/(@[^@]+)/g);
+      return parts.map((part, index) => {
+        if (part.startsWith("@")) {
+          const key = part.slice(1).toLowerCase();
+          const username = userMap[key] || part.slice(1);
+          return (
+            <span key={index} className="text-blue-500 hover:underline">
+              @{username}
+            </span>
+          );
+        }
+        return (
+          <span key={index} className="text-gray-800">
+            {part}
           </span>
-        ) : (
-          <span key={i}>{part} </span>
-        )
-      );
+        );
+      });
+    };
 
     if (action.includes("uploaded file(s):")) {
       const [userPart, filePart] = action.split(" uploaded file(s): ");

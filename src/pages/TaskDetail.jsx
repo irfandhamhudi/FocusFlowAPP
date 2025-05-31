@@ -1107,19 +1107,23 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                 ).initials
                               )}
                             </div>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <p className="font-semibold">
-                                  {c.user?.username || "Unknown"}
-                                </p>
-                                <p className="text-gray-500 text-xs">
-                                  ({c.user?.email})
-                                </p>
-                                <p className="text-gray-500 text-xs">
-                                  {formatRelativeTime(c.createdAt)}
-                                </p>
+                            <div className="flex-1 overflow-hidden">
+                              <div className="flex justify-between gap-1 flex-col lg:flex-row lg:items-center lg:gap-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold">
+                                    {c.user?.username || "Unknown"}
+                                  </p>
+                                  <p className="text-gray-500 text-xs">
+                                    ({c.user?.email})
+                                  </p>
+                                </div>
+                                <div className="flex items-center ">
+                                  <p className="text-gray-500 text-xs">
+                                    {formatRelativeTime(c.createdAt)}
+                                  </p>
+                                </div>
                               </div>
-                              <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded-md">
+                              <div className="mt-2 break-words lg:w-full w-[280px] border border-gray-200 bg-gray-50 p-2 rounded-md">
                                 <div className="text-sm">
                                   {parseTextWithMentions(c.comment)}
                                 </div>
@@ -1199,7 +1203,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                 </form>
                               )}
                               {c.replies?.length > 0 && (
-                                <div className="ml-4 mt-2 space-y-4">
+                                <div className=" mt-2 space-y-4">
                                   {c.replies.map((reply) => (
                                     <div
                                       key={reply._id}
@@ -1229,21 +1233,25 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                           )}
                                         </div>
                                         <div className="flex-1">
-                                          <div className="flex items-center gap-2">
-                                            <p className="font-semibold">
-                                              {reply.user?.username ||
-                                                "Unknown"}
-                                            </p>
-                                            <p className="text-gray-500 text-xs">
-                                              ({reply.user?.email})
-                                            </p>
-                                            <p className="text-gray-500 text-xs">
-                                              {formatRelativeTime(
-                                                reply.createdAt
-                                              )}
-                                            </p>
+                                          <div className="flex justify-between gap-1 flex-col lg:flex-row lg:items-center lg:gap-2">
+                                            <div className="flex items-center gap-2">
+                                              <p className="font-semibold">
+                                                {reply.user?.username ||
+                                                  "Unknown"}
+                                              </p>
+                                              <p className="text-gray-500 text-xs">
+                                                ({reply.user?.email})
+                                              </p>
+                                            </div>
+                                            <div className="flex items-center ">
+                                              <p className="text-gray-500 text-xs">
+                                                {formatRelativeTime(
+                                                  reply.createdAt
+                                                )}
+                                              </p>
+                                            </div>
                                           </div>
-                                          <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded-md">
+                                          <div className="mt-2  break-words lg:w-[380px]  w-[240px] border border-gray-200 bg-gray-50 p-2 rounded-md">
                                             <div className="text-sm">
                                               {parseTextWithMentions(
                                                 reply.comment

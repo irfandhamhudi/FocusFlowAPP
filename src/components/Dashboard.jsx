@@ -800,19 +800,22 @@ const Dashboard = () => {
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
                             {activity.createdAt
-                              ? new Date(activity.createdAt).toLocaleString(
-                                  "id-ID",
-                                  {
-                                    day: "2-digit",
-                                    month: "long",
-                                    year: "numeric",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    hour12: true,
-                                    timeZone: "Asia/Jakarta",
-                                  }
-                                )
-                              : "Date unavailable"}
+                              ? `${new Date(
+                                  activity.createdAt
+                                ).toLocaleDateString("en-ID", {
+                                  day: "2-digit",
+                                  month: "long",
+                                  year: "numeric",
+                                  timeZone: "Asia/Jakarta",
+                                })} - ${new Date(
+                                  activity.createdAt
+                                ).toLocaleTimeString("en-ID", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  hour12: true,
+                                  timeZone: "Asia/Jakarta",
+                                })}`
+                              : "-"}
                           </p>
                         </div>
                       </div>

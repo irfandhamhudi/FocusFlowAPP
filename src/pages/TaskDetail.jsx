@@ -73,7 +73,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
         startDate: data.startDate ? data.startDate.split("T")[0] : "",
         dueDate: data.dueDate ? data.dueDate.split("T")[0] : "",
         assignedTo: data.assignedTo
-          ? data.assignedTo.map((user) => user.email || "")
+          ? data.assignedTo.map((user) => user.email)
           : [],
         subtask: data.subtask
           ? data.subtask.map((sub) => ({
@@ -84,7 +84,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
         attachment: [],
       });
     } catch (err) {
-      toast.error(err.message || "Error fetching task.");
+      toast.error("Error fetching task.");
       setError(err.message);
     }
   }, [taskId]);
@@ -92,10 +92,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
   const loadRecentActivity = useCallback(async () => {
     try {
       const data = await fetchRecentActivity(10);
-      const relevantActivities = data.filter(
-        (activity) => activity.taskId === taskId
-      );
-      setActivities(relevantActivities);
+      setActivities(data.filter((activity) => activity.taskId === taskId));
     } catch (err) {
       toast.error("Error fetching recent activity.");
       setError(err.message);
@@ -105,12 +102,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
   useEffect(() => {
     loadTask();
     loadRecentActivity();
-  }, [taskId, loadTask, loadRecentActivity]);
-
-  const isValidEmail = (email) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
+  }, [loadTask, loadRecentActivity]);
 
   const handleUpdateSubmit = async (e) => {
     e.preventDefault();
@@ -118,15 +110,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       toast.error("Title is required.");
       return;
     }
-
-    const invalidEmails = formData.assignedTo.filter(
-      (email) => email && !isValidEmail(email)
-    );
-    if (invalidEmails.length > 0) {
-      toast.error(`Invalid emails: ${invalidEmails.join(", ")}`);
-      return;
-    }
-
     try {
       const taskData = {
         title: formData.title,
@@ -137,31 +120,31 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
           ? formData.tags
               .split(",")
               .map((tag) => tag.trim())
-              .filter((tag) => tag)
+              .filter(Boolean)
           : [],
         startDate: formData.startDate || undefined,
         dueDate: formData.dueDate || undefined,
-        assignedTo: formData.assignedTo.filter((email) => email),
+        assignedTo: formData.assignedTo.filter(Boolean),
         subtask: formData.subtask.filter((sub) => sub.title.trim()),
-        attachment:
-          formData.attachment.length > 0 ? formData.attachment : undefined,
+        attachment: formData.attachment.length
+          ? formData.attachment
+          : undefined,
       };
-
       await updateTask(taskId, taskData);
       setIsEditing(false);
-      toast.success("Task updated successfully!");
+      toast.success("Task updated!");
       loadTask();
       loadRecentActivity();
       onTaskUpdated();
     } catch (err) {
-      toast.error(err.message || "Failed to update task.");
+      toast.error("Failed to update task.");
       setError(err.message);
     }
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleFileChange = (files) => {
@@ -171,7 +154,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     if (newFiles.length !== files.length) {
       toast.error("Only JPEG, PNG, and PDF files are allowed.");
     }
-    if (newFiles.length > 0) {
+    if (newFiles.length) {
       setFormData((prev) => ({
         ...prev,
         attachment: [...prev.attachment, ...newFiles],
@@ -193,15 +176,10 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      handleFileChange(files);
-    }
+    handleFileChange(e.dataTransfer.files);
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current.click();
-  };
+  const handleUploadClick = () => fileInputRef.current.click();
 
   const handleRemoveFile = (index) => {
     setFormData((prev) => ({
@@ -213,17 +191,13 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
   const handleSubtaskChange = (index, value) => {
     const updatedSubtasks = [...formData.subtask];
     updatedSubtasks[index] = { ...updatedSubtasks[index], title: value };
-    setFormData({ ...formData, subtask: updatedSubtasks });
+    setFormData((prev) => ({ ...prev, subtask: updatedSubtasks }));
   };
 
   const handleSubtaskToggle = async (index) => {
     const updatedSubtasks = [...formData.subtask];
-    updatedSubtasks[index] = {
-      ...updatedSubtasks[index],
-      completed: !updatedSubtasks[index].completed,
-    };
-    setFormData({ ...formData, subtask: updatedSubtasks });
-
+    updatedSubtasks[index].completed = !updatedSubtasks[index].completed;
+    setFormData((prev) => ({ ...prev, subtask: updatedSubtasks }));
     try {
       await updateTask(taskId, { subtask: updatedSubtasks });
       toast.success("Subtask updated.");
@@ -231,22 +205,23 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       loadRecentActivity();
       onTaskUpdated();
     } catch (err) {
-      toast.error(err.message || "Error updating subtask.");
+      console.error("Error updating subtask:", err);
+      toast.error("Error updating subtask.");
     }
   };
 
   const addSubtask = () => {
-    setFormData({
-      ...formData,
-      subtask: [...formData.subtask, { title: "", completed: false }],
-    });
+    setFormData((prev) => ({
+      ...prev,
+      subtask: [...prev.subtask, { title: "", completed: false }],
+    }));
   };
 
   const removeSubtask = (index) => {
-    setFormData({
-      ...formData,
-      subtask: formData.subtask.filter((_, i) => i !== index),
-    });
+    setFormData((prev) => ({
+      ...prev,
+      subtask: prev.subtask.filter((_, i) => i !== index),
+    }));
   };
 
   const handleCommentSubmit = async (e) => {
@@ -262,7 +237,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       loadTask();
       loadRecentActivity();
     } catch (err) {
-      toast.error(err.message || "Error adding comment.");
+      console.error("Error adding comment:", err);
+      toast.error("Error adding comment.");
     }
   };
 
@@ -280,7 +256,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       loadTask();
       loadRecentActivity();
     } catch (err) {
-      toast.error(err.message || "Error adding reply.");
+      console.error("Error adding reply:", err);
+      toast.error("Error adding reply.");
     }
   };
 
@@ -294,25 +271,33 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
 
   const handleMentionInput = (value) => {
     setComment(value);
-    const lastWord = value.split(" ").pop();
+    const lastWord = value.trim().split(/\s+/).pop();
     if (lastWord.startsWith("@")) {
       const searchTerm = lastWord.slice(1).toLowerCase();
-      // Combine assignedTo and owner emails, ensuring no duplicates
-      const assignedEmails = task?.assignedTo
-        ? task.assignedTo
-            .filter((user) => user.email?.toLowerCase().includes(searchTerm))
-            .map((user) => ({ email: user.email }))
+      const assignedUsers = task?.assignedTo
+        ?.filter((user) => user?.username?.toLowerCase().includes(searchTerm))
+        .map((user) => ({
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+        }));
+      const ownerUser = task?.owner?.username
+        ?.toLowerCase()
+        .includes(searchTerm)
+        ? [
+            {
+              _id: task.owner._id,
+              username: task.owner.username,
+              email: task.owner.email,
+            },
+          ]
         : [];
-      const ownerEmail = task?.owner?.email?.toLowerCase().includes(searchTerm)
-        ? [{ email: task.owner.email }]
-        : [];
-      // Use Set to remove duplicates based on email
-      const uniqueEmails = [
+      const uniqueUsers = [
         ...new Map(
-          [...assignedEmails, ...ownerEmail].map((item) => [item.email, item])
+          [...assignedUsers, ...ownerUser].map((user) => [user._id, user])
         ).values(),
       ];
-      setSuggestions(uniqueEmails);
+      setSuggestions(uniqueUsers);
       setShowSuggestions(true);
       setCurrentTextarea("comment");
     } else {
@@ -327,22 +312,32 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     const lastWord = value.split(" ").pop();
     if (lastWord.startsWith("@")) {
       const searchTerm = lastWord.slice(1).toLowerCase();
-      // Combine assignedTo and owner emails, ensuring no duplicates
-      const assignedEmails = task?.assignedTo
+      const assignedUsers = task?.assignedTo
         ? task.assignedTo
-            .filter((user) => user.email?.toLowerCase().includes(searchTerm))
-            .map((user) => ({ email: user.email }))
+            .filter((user) => user.username?.toLowerCase().includes(searchTerm))
+            .map((user) => ({
+              _id: user._id,
+              username: user.username,
+              email: user.email,
+            }))
         : [];
-      const ownerEmail = task?.owner?.email?.toLowerCase().includes(searchTerm)
-        ? [{ email: task.owner.email }]
+      const ownerUser = task?.owner?.username
+        ?.toLowerCase()
+        .includes(searchTerm)
+        ? [
+            {
+              _id: task.owner._id,
+              username: task.owner.username,
+              email: task.owner.email,
+            },
+          ]
         : [];
-      // Use Set to remove duplicates based on email
-      const uniqueEmails = [
+      const uniqueUsers = [
         ...new Map(
-          [...assignedEmails, ...ownerEmail].map((item) => [item.email, item])
+          [...assignedUsers, ...ownerUser].map((user) => [user._id, user])
         ).values(),
       ];
-      setSuggestions(uniqueEmails);
+      setSuggestions(uniqueUsers);
       setShowSuggestions(true);
       setCurrentTextarea(id);
     } else {
@@ -352,13 +347,14 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     }
   };
 
-  const handleSelectMention = (email) => {
+  const handleSelectMention = (user) => {
     const textareaValue =
       currentTextarea === "comment"
         ? comment
         : replyInputs[currentTextarea] || "";
-    const lastSpaceIndex = textareaValue.lastIndexOf("@");
-    const newValue = textareaValue.substring(0, lastSpaceIndex) + `@${email} `;
+    const lastAtIndex = textareaValue.lastIndexOf("@");
+    const newValue =
+      textareaValue.substring(0, lastAtIndex) + `@${user.username} `;
     if (currentTextarea === "comment") {
       setComment(newValue);
     } else {
@@ -381,24 +377,24 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     { value: "high", label: "High" },
   ];
 
-  const handleStatusChange = (selectedOption) => {
-    setFormData({ ...formData, status: selectedOption?.value || "pending" });
+  const handleStatusChange = (option) => {
+    setFormData((prev) => ({ ...prev, status: option?.value || "pending" }));
   };
 
-  const handlePriorityChange = (selectedOption) => {
-    setFormData({ ...formData, priority: selectedOption?.value || "low" });
+  const handlePriorityChange = (option) => {
+    setFormData((prev) => ({ ...prev, priority: option?.value || "low" }));
   };
 
-  const handleAssignedToChange = (selectedOptions) => {
-    const selectedEmails = selectedOptions
-      ? selectedOptions.map((option) => option.value)
-      : [];
-    setFormData({ ...formData, assignedTo: selectedEmails });
+  const handleAssignedToChange = (options) => {
+    setFormData((prev) => ({
+      ...prev,
+      assignedTo: options ? options.map((opt) => opt.value) : [],
+    }));
   };
 
   const formatDateOnly = (date) => {
     if (!date) return "-";
-    return new Date(date).toLocaleDateString("in-ID", {
+    return new Date(date).toLocaleDateString("en-ID", {
       day: "2-digit",
       month: "long",
       year: "numeric",
@@ -411,7 +407,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     const now = new Date();
     const time = new Date(date);
     const diffInSeconds = Math.floor((now - time) / 1000);
-
     if (diffInSeconds < 60)
       return `${diffInSeconds} second${diffInSeconds !== 1 ? "s" : ""} ago`;
     const diffInMinutes = Math.floor(diffInSeconds / 60);
@@ -430,26 +425,58 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
     return `${diffInYears} year${diffInYears !== 1 ? "s" : ""} ago`;
   };
 
-  const formatAction = (action) => {
-    const parseTextWithMentions = (text) => {
-      const parts = text.split(/(@[\w.@]+)/g);
-      return parts.map((part, index) =>
-        part.startsWith("@") ? (
+  const parseTextWithMentions = (text) => {
+    const userMap = {};
+    task?.assignedTo?.forEach((user) => {
+      if (user.email && user.username) {
+        userMap[user.email.toLowerCase()] = user.username;
+        userMap[user.username.toLowerCase()] = user.username;
+      }
+    });
+    if (task?.owner?.email && task?.owner?.username) {
+      userMap[task.owner.email.toLowerCase()] = task.owner.username;
+      userMap[task.owner.username.toLowerCase()] = task.owner.username;
+    }
+
+    // Updated regex to allow spaces in usernames, stop at next @ or end
+    const parts = text.split(/(@[^@]+)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith("@")) {
+        const key = part.slice(1).toLowerCase();
+        const username = userMap[key] || part.slice(1);
+        return (
           <span key={index} className="text-blue-500 hover:underline">
-            {part}{" "}
+            @{username}
           </span>
-        ) : (
-          <span key={index}>{part} </span>
-        )
+        );
+      }
+      return (
+        <span key={index} className="text-gray-800">
+          {part}
+        </span>
       );
-    };
+    });
+  };
+
+  const formatAction = (action) => {
+    const userMap = {};
+    task?.assignedTo?.forEach((user) => {
+      if (user.email && user.username) {
+        userMap[user.email.toLowerCase()] = user.username;
+        userMap[user.username.toLowerCase()] = user.username;
+      }
+    });
+    if (task?.owner?.email && task?.owner?.username) {
+      userMap[task.owner.email.toLowerCase()] = task.owner.username;
+      userMap[task.owner.username.toLowerCase()] = task.owner.username;
+    }
 
     if (action.includes("uploaded file(s):")) {
       const [userPart, filePart] = action.split(" uploaded file(s): ");
       return (
         <>
           {parseTextWithMentions(userPart)} uploaded file(s):{" "}
-          <span className="font-semibold">{filePart}</span>
+          <span className="font-semibold text-gray-800">{filePart}</span>
         </>
       );
     }
@@ -458,7 +485,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
       return (
         <>
           {parseTextWithMentions(prefix)} created task{" "}
-          <span className="font-semibold">{title}</span>
+          <span className="font-semibold text-gray-800">{title}</span>
         </>
       );
     }
@@ -473,8 +500,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
         </>
       );
     }
-    if (action.includes("replied to comment")) {
-      const [prefix, replyPart] = action.split(" : ");
+    if (action.includes("replied to comment :")) {
+      const [prefix, replyPart] = action.split(" replied to comment : ");
       return (
         <>
           {parseTextWithMentions(prefix)}:{" "}
@@ -525,7 +552,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
   }
 
   return (
-    <div className="relative p-6 bg-white min-h-screen ">
+    <div className="relative p-6 bg-white min-h-screen">
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
           {error}
@@ -574,7 +601,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 placeholder="Task title"
                 className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
                 required
-                aria-required="true"
               />
             </div>
             <div>
@@ -585,8 +611,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 name="description"
                 value={formData.description}
                 onChange={handleChange}
-                placeholder="Task description (optional)"
-                className="w-full text-justify p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                placeholder="Task description"
+                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
                 rows="4"
               />
             </div>
@@ -598,12 +624,11 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 <Select
                   options={statusOptions}
                   value={statusOptions.find(
-                    (option) => option.value === formData.status
+                    (opt) => opt.value === formData.status
                   )}
                   onChange={handleStatusChange}
                   placeholder="Select status..."
                   className="text-sm"
-                  classNamePrefix="react-select"
                 />
               </div>
               <div>
@@ -613,12 +638,11 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 <Select
                   options={priorityOptions}
                   value={priorityOptions.find(
-                    (option) => option.value === formData.priority
+                    (opt) => opt.value === formData.priority
                   )}
                   onChange={handlePriorityChange}
                   placeholder="Select priority..."
                   className="text-sm"
-                  classNamePrefix="react-select"
                 />
               </div>
             </div>
@@ -631,7 +655,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 name="tags"
                 value={formData.tags}
                 onChange={handleChange}
-                placeholder="Tags, separated by commas (optional)"
+                placeholder="Tags, separated by commas"
                 className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
@@ -674,13 +698,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 onChange={handleAssignedToChange}
                 placeholder="Enter email addresses..."
                 className="text-sm"
-                classNamePrefix="react-select"
                 formatCreateLabel={(input) => `Add "${input}"`}
-                noOptionsMessage={() => "Type an email to add"}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Enter valid email addresses to assign users
-              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -699,7 +718,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                     type="button"
                     onClick={() => removeSubtask(index)}
                     className="text-red-600 hover:text-red-800"
-                    aria-label="Remove subtask"
                   >
                     <TrashIcon className="h-4 w-4" />
                   </button>
@@ -738,7 +756,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                     type="button"
                     onClick={handleUploadClick}
                     className="text-blue-600 hover:underline"
-                    aria-label="Browse files"
                   >
                     browse
                   </button>
@@ -760,9 +777,9 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                   {formData.attachment.map((file, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between border border-borderPrimary p-2 rounded-md text-sm"
+                      className="flex items-center justify-between border border-gray-200 p-2 rounded-md text-sm"
                     >
-                      <div className="flex items-start gap-2 p-3">
+                      <div className="flex items-start gap-2">
                         {file.type === "application/pdf" ? (
                           <svg
                             className="w-5 h-5 text-red-500"
@@ -781,8 +798,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                           </svg>
                         )}
                         <div>
-                          <p className="text-sm break-words">{file.name}</p>
-                          <p className="mt-1 text-xs text-gray-500">
+                          <p className="text-sm">{file.name}</p>
+                          <p className="text-xs text-gray-500">
                             {getFileType(file.name)} -{" "}
                             {(file.size / (1024 * 1024)).toFixed(2)} MB
                           </p>
@@ -792,7 +809,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                         type="button"
                         onClick={() => handleRemoveFile(index)}
                         className="text-red-600 hover:text-red-800"
-                        aria-label="Remove file"
                       >
                         <TrashIcon className="h-4 w-4" />
                       </button>
@@ -804,15 +820,14 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
             <div className="flex gap-2">
               <button
                 type="submit"
-                className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 "
+                className="text-xs bg-font1 text-white px-4 py-2 rounded-md hover:bg-white hover:text-font1 hover:border hover:border-font1"
               >
                 Save Changes
               </button>
               <button
                 type="button"
                 onClick={() => setIsEditing(false)}
-                className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200
-"
+                className="text-xs border border-font1 text-black px-4 py-2 rounded-md hover:bg-font1 hover:text-white"
               >
                 Cancel
               </button>
@@ -839,13 +854,13 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 {task.priority ? `${task.priority} Priority` : "No Priority"}
               </span>
             </div>
-            <div className="space-y-4 mt-5">
+            <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <UserRoundPen className="h-5 w-5 text-gray-700" />
                 {task.owner ? (
                   <div className="flex items-center gap-2">
                     <span
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white font-medium text-sm"
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm"
                       style={{
                         backgroundColor: getInitialsAndColor(
                           task.owner.username
@@ -872,39 +887,32 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
               </div>
               <div className="flex items-center gap-2">
                 <UsersRound className="h-5 w-5 text-gray-700" />
-                {Array.isArray(task.assignedTo) &&
-                task.assignedTo.length > 0 ? (
+                {task.assignedTo?.length ? (
                   <div className="flex">
-                    {task.assignedTo.map((user, index) => {
-                      const { initials, color } = getInitialsAndColor(
-                        user.username
-                      );
-                      return (
-                        <div
-                          key={index}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-medium text-sm border-2 border-white ${
-                            index > 0 ? "ml-[-8px]" : ""
-                          }`}
-                          style={{
-                            backgroundColor: color,
-                            zIndex: task.assignedTo.length - index,
-                          }}
-                          title={user.username}
-                        >
-                          {user.avatar ? (
-                            <img
-                              src={user.avatar}
-                              alt={user.username}
-                              className="w-full h-full rounded-full object-cover"
-                            />
-                          ) : (
-                            <span className="w-full h-full flex items-center justify-center">
-                              {initials}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {task.assignedTo.map((user, index) => (
+                      <div
+                        key={user._id}
+                        className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-sm border-2 border-white ${
+                          index > 0 ? "ml-[-8px]" : ""
+                        }`}
+                        style={{
+                          backgroundColor: getInitialsAndColor(user.username)
+                            .color,
+                          zIndex: task.assignedTo.length - index,
+                        }}
+                        title={user.username}
+                      >
+                        {user.avatar ? (
+                          <img
+                            src={user.avatar}
+                            alt={user.username}
+                            className="w-full h-full rounded-full object-cover"
+                          />
+                        ) : (
+                          getInitialsAndColor(user.username).initials
+                        )}
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   "-"
@@ -924,12 +932,10 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2 text-sm ">
+              <div className="flex items-center gap-2 text-sm">
                 <Tags className="h-5 w-5 text-gray-700" />
                 <p className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-medium">
-                  {Array.isArray(task.tags) && task.tags.length > 0
-                    ? task.tags.join(", ")
-                    : "-"}
+                  {task.tags?.length ? task.tags.join(", ") : "-"}
                 </p>
               </div>
             </div>
@@ -938,11 +944,9 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                 <FileText className="h-5 w-5 text-gray-600" />
                 <h3 className="text-sm font-semibold">Description</h3>
               </div>
-              <div className="overflow-auto w-full">
-                <p className="text-justify p-4 break-words border border-borderPrimary bg-white rounded-md text-sm text-gray-600 ">
-                  {task.description || "No description provided."}
-                </p>
-              </div>
+              <p className="p-4 border border-gray-200 bg-white rounded-md text-sm text-gray-600">
+                {task.description || "No description provided."}
+              </p>
             </div>
             {task.attachment?.length > 0 && (
               <div className="mt-6">
@@ -959,12 +963,12 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                   ).map((attachment, index) => (
                     <div
                       key={index}
-                      className="flex items-start justify-between border border-gray-200 p-4 rounded-md text-sm"
+                      className="flex items-start justify-between border border-gray-200 p-3 rounded-md text-sm"
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2">
                         {getFileType(attachment.originalName) === "PDF" ? (
                           <svg
-                            className="w-6 h-6 text-red-500"
+                            className="w-5 h-5 text-red-500"
                             fill="currentColor"
                             viewBox="0 0 24 24"
                           >
@@ -972,7 +976,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                           </svg>
                         ) : (
                           <svg
-                            className="w-6 h-6 text-blue-500"
+                            className="w-5 h-5 text-blue-500"
                             fill="currentColor"
                             viewBox="0 0 24 24"
                           >
@@ -980,10 +984,8 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                           </svg>
                         )}
                         <div>
-                          <p className="text-sm font-medium break-words">
-                            {attachment.originalName}
-                          </p>
-                          <p className="mt-1 text-xs text-gray-500">
+                          <p className="text-sm">{attachment.originalName}</p>
+                          <p className="text-xs text-gray-500">
                             {getFileType(attachment.originalName)} -{" "}
                             {attachment.size} MB
                           </p>
@@ -992,21 +994,20 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                       <button
                         onClick={() => handleDownload(attachment.originalName)}
                         className="text-blue-600 hover:underline"
-                        aria-label={`Download ${attachment.originalName}`}
                       >
                         <CloudDownload className="h-5 w-5" />
                       </button>
                     </div>
                   ))}
+                  {task.attachment.length > 2 && (
+                    <button
+                      onClick={() => setIsPreviewOpen(!isPreviewOpen)}
+                      className="mt-2 text-blue-600 hover:underline text-sm"
+                    >
+                      {isPreviewOpen ? "Show less" : "Show all attachments"}
+                    </button>
+                  )}
                 </div>
-                {task.attachment.length > 2 && (
-                  <button
-                    onClick={() => setIsPreviewOpen(!isPreviewOpen)}
-                    className="mt-2 text-blue-600 hover:underline text-sm"
-                  >
-                    {isPreviewOpen ? "Show less" : "Show all attachments"}
-                  </button>
-                )}
               </div>
             )}
             <div className="mt-6">
@@ -1027,7 +1028,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
               </div>
               {activeTab === "subtasks" && (
                 <div>
-                  {task.subtask?.length > 0 ? (
+                  {task.subtask?.length ? (
                     <div className="border border-gray-200 p-4 rounded-md">
                       <div className="flex items-center gap-2 mb-2">
                         <ListTodo className="h-5 w-5 text-gray-600" />
@@ -1081,261 +1082,272 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
               )}
               {activeTab === "comments" && (
                 <div>
-                  {task.comments?.length > 0 ? (
+                  {task.comments?.length ? (
                     <div className="space-y-4">
                       {task.comments.map((c) => (
                         <div key={c._id} className="border-t pt-4">
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-start gap-2">
-                              <div
-                                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm"
-                                style={{
-                                  backgroundColor: getInitialsAndColor(
-                                    c.user?.username || "Unknown"
-                                  ).color,
-                                }}
-                              >
-                                {c.user.avatar ? (
-                                  <img
-                                    src={c.user.avatar}
-                                    alt="Avatar"
-                                    className="w-9 h-9 rounded-full object-cover"
-                                  />
-                                ) : (
-                                  getInitialsAndColor(
-                                    c.user?.username || "Unknown"
-                                  ).initials
-                                )}
-                              </div>
-                              <div className="flex flex-col">
-                                <div className="flex items-center">
-                                  <div className="flex items-center gap-2">
-                                    <p className="font-semibold">
-                                      {c.user?.username || "Unknown"}
-                                    </p>
-                                    <p className="text-gray-500 text-xs">
-                                      ( {c.user?.email} )
-                                    </p>
-                                  </div>
-                                  <p className="text-gray-500 text-xs ml-2">
-                                    {formatRelativeTime(c.createdAt)}
-                                  </p>
-                                </div>
-                                <div className="mb-3 border border-borderPrimary bg-gray-50 p-2 rounded-md">
-                                  <p className="break-words w-[400px] text-sm text-gray-600 mt-1 ">
-                                    {formatAction(c.comment)}
-                                  </p>
-                                  <button
-                                    onClick={() =>
-                                      setReplyInputs((prev) => ({
-                                        ...prev,
-                                        [c._id]: prev[c._id] || "",
-                                      }))
-                                    }
-                                    className=" text-blue-600 hover:underline text-sm mt-2"
-                                  >
-                                    Reply
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          {replyInputs[c._id] !== undefined && (
-                            <form
-                              onSubmit={(e) =>
-                                handleReplySubmit(c._id, c._id, e)
-                              }
-                              className="ml-10 mt-2 relative"
+                          <div className="flex items-start gap-2">
+                            <div
+                              className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm"
+                              style={{
+                                backgroundColor: getInitialsAndColor(
+                                  c.user?.username || "Unknown"
+                                ).color,
+                              }}
                             >
-                              <textarea
-                                value={replyInputs[c._id] || ""}
-                                onChange={(e) =>
-                                  handleReplyInputChange(c._id, e.target.value)
-                                }
-                                placeholder="Write a reply (@email to mention)"
-                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
-                                rows="3"
-                              />
-                              {showSuggestions && currentTextarea === c._id && (
-                                <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg max-h-full overflow-y-auto w-full mt-1">
-                                  {suggestions.length > 0 ? (
-                                    suggestions.map((user) => (
-                                      <li
-                                        key={user.email}
-                                        onClick={() =>
-                                          handleSelectMention(user.email)
-                                        }
-                                        className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
-                                      >
-                                        {user.email}
-                                      </li>
-                                    ))
-                                  ) : (
-                                    <li className="px-3 py-2 text-sm text-gray-500">
-                                      No matches found
-                                    </li>
-                                  )}
-                                </ul>
+                              {c.user?.avatar ? (
+                                <img
+                                  src={c.user.avatar}
+                                  alt={c.user.username}
+                                  className="w-9 h-9 rounded-full object-cover"
+                                />
+                              ) : (
+                                getInitialsAndColor(
+                                  c.user?.username || "Unknown"
+                                ).initials
                               )}
-                              <div className="flex gap-2 mt-2">
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="font-semibold">
+                                  {c.user?.username || "Unknown"}
+                                </p>
+                                <p className="text-gray-500 text-xs">
+                                  ({c.user?.email})
+                                </p>
+                                <p className="text-gray-500 text-xs">
+                                  {formatRelativeTime(c.createdAt)}
+                                </p>
+                              </div>
+                              <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded-md">
+                                <div className="text-sm">
+                                  {parseTextWithMentions(c.comment)}
+                                </div>
                                 <button
-                                  type="submit"
-                                  className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 
-"
-                                >
-                                  Send
-                                </button>
-                                <button
-                                  type="button"
                                   onClick={() =>
-                                    setReplyInputs((prev) => {
-                                      const { [c._id]: _, ...rest } = prev;
-                                      return rest;
-                                    })
+                                    setReplyInputs((prev) => ({
+                                      ...prev,
+                                      [c._id]: prev[c._id] || "",
+                                    }))
                                   }
-                                  className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200
-"
+                                  className="text-blue-600 hover:underline text-sm mt-1"
                                 >
-                                  Cancel
+                                  Reply
                                 </button>
                               </div>
-                            </form>
-                          )}
-                          {c.replies?.length > 0 && (
-                            <div className="ml-10 mt-2 space-y-4">
-                              {c.replies.map((reply) => (
-                                <div key={reply._id} className="border-t pt-4">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex items-start gap-2">
-                                      <div
-                                        className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm"
-                                        style={{
-                                          backgroundColor: getInitialsAndColor(
-                                            reply.user?.username || "Unknown"
-                                          ).color,
-                                        }}
-                                      >
-                                        {reply.user.avatar ? (
-                                          <img
-                                            src={reply.user.avatar}
-                                            alt="Avatar"
-                                            className="w-9 h-9 rounded-full object-cover"
-                                          />
+                              {replyInputs[c._id] !== undefined && (
+                                <form
+                                  onSubmit={(e) =>
+                                    handleReplySubmit(c._id, c._id, e)
+                                  }
+                                  className="mt-2 ml-4 relative"
+                                >
+                                  <textarea
+                                    value={replyInputs[c._id] || ""}
+                                    onChange={(e) =>
+                                      handleReplyInputChange(
+                                        c._id,
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="Type @username to mention..."
+                                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                                    rows="3"
+                                  />
+                                  {showSuggestions &&
+                                    currentTextarea === c._id && (
+                                      <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg w-full mt-1 max-h-40 overflow-y-auto">
+                                        {suggestions.length ? (
+                                          suggestions.map((user) => (
+                                            <li
+                                              key={user._id}
+                                              onClick={() =>
+                                                handleSelectMention(user)
+                                              }
+                                              className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                                            >
+                                              {user.username}
+                                            </li>
+                                          ))
                                         ) : (
-                                          getInitialsAndColor(
-                                            reply.user?.email || "Unknown"
-                                          ).initials
+                                          <li className="px-3 py-2 text-sm text-gray-500">
+                                            No matches found
+                                          </li>
                                         )}
-                                      </div>
-                                      <div className="flex flex-col">
-                                        <div className="flex items-center">
+                                      </ul>
+                                    )}
+                                  <div className="flex gap-2 mt-2">
+                                    <button
+                                      type="submit"
+                                      className="text-xs bg-font1 text-white px-4 py-2 rounded-md hover:bg-white hover:text-font1 hover:border hover:border-font1"
+                                    >
+                                      Send
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setReplyInputs((prev) => {
+                                          const { [c._id]: _, ...rest } = prev;
+                                          return rest;
+                                        })
+                                      }
+                                      className="text-xs border border-font1 text-black px-4 py-2 rounded-md hover:bg-font1 hover:text-white"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </form>
+                              )}
+                              {c.replies?.length > 0 && (
+                                <div className="ml-4 mt-2 space-y-4">
+                                  {c.replies.map((reply) => (
+                                    <div
+                                      key={reply._id}
+                                      className="border-t pt-4"
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <div
+                                          className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm"
+                                          style={{
+                                            backgroundColor:
+                                              getInitialsAndColor(
+                                                reply.user?.username ||
+                                                  "Unknown"
+                                              ).color,
+                                          }}
+                                        >
+                                          {reply.user?.avatar ? (
+                                            <img
+                                              src={reply.user.avatar}
+                                              alt={reply.user.username}
+                                              className="w-9 h-9 rounded-full object-cover"
+                                            />
+                                          ) : (
+                                            getInitialsAndColor(
+                                              reply.user?.username || "Unknown"
+                                            ).initials
+                                          )}
+                                        </div>
+                                        <div className="flex-1">
                                           <div className="flex items-center gap-2">
                                             <p className="font-semibold">
                                               {reply.user?.username ||
                                                 "Unknown"}
                                             </p>
                                             <p className="text-gray-500 text-xs">
-                                              ( {reply.user?.email} )
+                                              ({reply.user?.email})
+                                            </p>
+                                            <p className="text-gray-500 text-xs">
+                                              {formatRelativeTime(
+                                                reply.createdAt
+                                              )}
                                             </p>
                                           </div>
-                                          <p className="text-gray-500 text-xs ml-2">
-                                            {formatRelativeTime(
-                                              reply.createdAt
-                                            )}
-                                          </p>
-                                        </div>
-                                        <div className="border border-borderPrimary bg-gray-50 p-2 rounded-md">
-                                          <p className="break-words w-[300px]  text-sm text-gray-600 mt-1 ">
-                                            {formatAction(reply.comment)}
-                                          </p>
-                                          <button
-                                            onClick={() =>
-                                              setReplyInputs((prev) => ({
-                                                ...prev,
-                                                [reply._id]:
-                                                  prev[reply._id] || "",
-                                              }))
-                                            }
-                                            className=" text-blue-600 hover:underline text-sm mt-2"
-                                          >
-                                            Reply
-                                          </button>
+                                          <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded-md">
+                                            <div className="text-sm">
+                                              {parseTextWithMentions(
+                                                reply.comment
+                                              )}
+                                            </div>
+                                            <button
+                                              onClick={() =>
+                                                setReplyInputs((prev) => ({
+                                                  ...prev,
+                                                  [reply._id]:
+                                                    prev[reply._id] || "",
+                                                }))
+                                              }
+                                              className="text-blue-600 hover:underline text-sm mt-1"
+                                            >
+                                              Reply
+                                            </button>
+                                          </div>
+                                          {replyInputs[reply._id] !==
+                                            undefined && (
+                                            <form
+                                              onSubmit={(e) =>
+                                                handleReplySubmit(
+                                                  c._id,
+                                                  reply._id,
+                                                  e
+                                                )
+                                              }
+                                              className="mt-2 relative"
+                                            >
+                                              <textarea
+                                                value={
+                                                  replyInputs[reply._id] || ""
+                                                }
+                                                onChange={(e) =>
+                                                  handleReplyInputChange(
+                                                    reply._id,
+                                                    e.target.value
+                                                  )
+                                                }
+                                                placeholder="Type @username to mention..."
+                                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
+                                                rows="3"
+                                              />
+                                              {showSuggestions &&
+                                                currentTextarea ===
+                                                  reply._id && (
+                                                  <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg w-full mt-1 max-h-40 overflow-y-auto">
+                                                    {suggestions.length ? (
+                                                      suggestions.map(
+                                                        (user) => (
+                                                          <li
+                                                            key={user._id}
+                                                            onClick={() =>
+                                                              handleSelectMention(
+                                                                user
+                                                              )
+                                                            }
+                                                            className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                                                          >
+                                                            {user.username}
+                                                          </li>
+                                                        )
+                                                      )
+                                                    ) : (
+                                                      <li className="px-3 py-2 text-sm text-gray-500">
+                                                        No matches found
+                                                      </li>
+                                                    )}
+                                                  </ul>
+                                                )}
+                                              <div className="flex gap-2 mt-2">
+                                                <button
+                                                  type="submit"
+                                                  className="text-xs bg-font1 text-white px-4 py-2 rounded-md hover:bg-white hover:text-font1 hover:border hover:border-font1"
+                                                >
+                                                  Send
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setReplyInputs((prev) => {
+                                                      const {
+                                                        [reply._id]: _,
+                                                        ...rest
+                                                      } = prev;
+                                                      return rest;
+                                                    })
+                                                  }
+                                                  className="text-xs border border-font1 text-black px-4 py-2 rounded-md hover:bg-font1 hover:text-white"
+                                                >
+                                                  Cancel
+                                                </button>
+                                              </div>
+                                            </form>
+                                          )}
                                         </div>
                                       </div>
                                     </div>
-                                  </div>
-                                  {replyInputs[reply._id] !== undefined && (
-                                    <form
-                                      onSubmit={(e) =>
-                                        handleReplySubmit(c._id, reply._id, e)
-                                      }
-                                      className="ml-10 mt-2 relative"
-                                    >
-                                      <textarea
-                                        value={replyInputs[reply._id] || ""}
-                                        onChange={(e) =>
-                                          handleReplyInputChange(
-                                            reply._id,
-                                            e.target.value
-                                          )
-                                        }
-                                        placeholder="Write a reply (@email to mention)"
-                                        className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
-                                        rows="3"
-                                      />
-                                      {showSuggestions &&
-                                        currentTextarea === reply._id && (
-                                          <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg max-h-full  w-full mt-1">
-                                            {suggestions.length > 0 ? (
-                                              suggestions.map((user) => (
-                                                <li
-                                                  key={user.email}
-                                                  onClick={() =>
-                                                    handleSelectMention(
-                                                      user.email
-                                                    )
-                                                  }
-                                                  className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
-                                                >
-                                                  {user.email}
-                                                </li>
-                                              ))
-                                            ) : (
-                                              <li className="px-3 py-2 text-sm text-gray-500">
-                                                No matches found
-                                              </li>
-                                            )}
-                                          </ul>
-                                        )}
-                                      <div className="flex gap-2 mt-2">
-                                        <button
-                                          type="submit"
-                                          className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 "
-                                        >
-                                          Send
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setReplyInputs((prev) => {
-                                              const {
-                                                [reply._id]: _,
-                                                ...rest
-                                              } = prev;
-                                              return rest;
-                                            })
-                                          }
-                                          className="text-xs mt-2 border border-font1 text-black px-4 py-2 rounded-md  hover:bg-font1 hover:text-white transition duration-200"
-                                        >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    </form>
-                                  )}
+                                  ))}
                                 </div>
-                              ))}
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1349,20 +1361,20 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                     <textarea
                       value={comment}
                       onChange={(e) => handleMentionInput(e.target.value)}
-                      placeholder="Write a comment (@email to mention)"
+                      placeholder="Type @username to mention..."
                       className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-sm"
                       rows="4"
                     />
                     {showSuggestions && currentTextarea === "comment" && (
-                      <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow max-h-full overflow-y-auto w-full mt-1">
-                        {suggestions.length > 0 ? (
+                      <ul className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg w-full mt-1 max-h-40 overflow-y-auto">
+                        {suggestions.length ? (
                           suggestions.map((user) => (
                             <li
-                              key={user.email}
-                              onClick={() => handleSelectMention(user.email)}
+                              key={user._id}
+                              onClick={() => handleSelectMention(user)}
                               className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
                             >
-                              {user.email}
+                              {user.username}
                             </li>
                           ))
                         ) : (
@@ -1374,8 +1386,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                     )}
                     <button
                       type="submit"
-                      className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:border hover:border-font1 hover:bg-white hover:text-font1 transition duration-200 
-"
+                      className="text-xs mt-2 bg-font1 text-white px-4 py-2 rounded-md hover:bg-white hover:text-font1 hover:border hover:border-font1"
                     >
                       Send
                     </button>
@@ -1384,7 +1395,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
               )}
               {activeTab === "recentActivity" && (
                 <div>
-                  {activities.length > 0 ? (
+                  {activities.length ? (
                     <div className="border border-gray-200 p-4 rounded-md max-h-96 overflow-y-auto">
                       {activities.map((activity) => (
                         <div
@@ -1402,7 +1413,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                             {activity.avatar ? (
                               <img
                                 src={activity.avatar}
-                                alt="Avatar"
+                                alt={activity.user}
                                 className="w-8 h-8 rounded-full object-cover"
                               />
                             ) : (
@@ -1410,9 +1421,9 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                 .initials
                             )}
                           </span>
-                          <div className="flex-1 overflow-auto">
-                            <div className="border border-borderPrimary bg-gray-50 p-2 rounded-md">
-                              <p className="text-sm break-words text-gray-600">
+                          <div className="flex-1">
+                            <div className="border border-gray-200 bg-gray-50 p-2 rounded-md">
+                              <p className="text-sm text-gray-600">
                                 {formatAction(activity.action)}
                               </p>
                             </div>
@@ -1421,7 +1432,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                 {activity.files.map((file, index) => (
                                   <div
                                     key={index}
-                                    className="flex items-start gap-2 border border-borderPrimary bg-gray-50 p-3 rounded-md cursor-pointer hover:bg-gray-100 transition duration-200"
+                                    className="flex items-start gap-2 border border-gray-200 bg-gray-50 p-2 rounded-md"
                                   >
                                     {getFileType(file.name) === "PDF" ? (
                                       <svg
@@ -1442,7 +1453,7 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                     )}
                                     <div>
                                       <p className="text-sm">{file.name}</p>
-                                      <p className="mt-1 text-xs text-gray-500">
+                                      <p className="text-xs text-gray-500">
                                         {getFileType(file.name)} - {file.size}{" "}
                                         MB
                                       </p>
@@ -1450,7 +1461,6 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                                     <button
                                       onClick={() => handleDownload(file.name)}
                                       className="ml-auto text-blue-600 hover:underline"
-                                      aria-label={`Download ${file.name}`}
                                     >
                                       <CloudDownload className="h-5 w-5" />
                                     </button>
@@ -1462,14 +1472,14 @@ function TaskDetail({ taskId, onClose, onTaskUpdated }) {
                               {activity.createdAt
                                 ? `${new Date(
                                     activity.createdAt
-                                  ).toLocaleDateString("in-ID", {
+                                  ).toLocaleDateString("en-ID", {
                                     day: "2-digit",
                                     month: "long",
                                     year: "numeric",
                                     timeZone: "Asia/Jakarta",
                                   })} - ${new Date(
                                     activity.createdAt
-                                  ).toLocaleTimeString("in-ID", {
+                                  ).toLocaleTimeString("en-ID", {
                                     hour: "2-digit",
                                     minute: "2-digit",
                                     hour12: true,

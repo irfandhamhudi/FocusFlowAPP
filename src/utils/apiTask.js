@@ -1,9 +1,8 @@
 import axios from "axios";
 
 const api = axios.create({
-  // baseURL: "https://api-focusflow-production.up.railway.app/api/v1/tasks",
+  baseURL: "https://api-focusflow-production.up.railway.app/api/v1/tasks",
   // baseURL: "http://localhost:5000/api/v1/tasks", // Adjust as needed
-  baseURL: "https://glowing-twilight-ac2653.netlify.app/api/v1/tasks",
   withCredentials: true, // Allow sending cookies for authentication
 });
 
